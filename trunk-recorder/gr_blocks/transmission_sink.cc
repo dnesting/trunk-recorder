@@ -86,13 +86,14 @@ void transmission_sink::create_filename() {
   std::string temp_path_string = temp_path_stream.str();
   boost::filesystem::create_directories(temp_path_string);
 
-  int nchars;
+  std::string source_str = (curr_src_id < 0) ? std::string("unknown") : std::to_string(curr_src_id);
 
+  int nchars;
   if (d_slot == -1) {
-    nchars = snprintf(current_filename, 255, "%s/%ld-%ld_%.0f.wav", temp_path_string.c_str(), d_current_call_talkgroup, work_start_time, d_current_call_freq);
+    nchars = snprintf(current_filename, 255, "%s/%ld-%s-%ld_%.0f.wav", temp_path_string.c_str(), d_current_call_talkgroup, source_str.c_str(), work_start_time, d_current_call_freq);
   } else {
     // this is for the case when it is a P25P2 TDMA or DMR recorder and 2 wav files are created, the slot is needed to keep them separate.
-    nchars = snprintf(current_filename, 255, "%s/%ld-%ld_%.0f.%d.wav", temp_path_string.c_str(), d_current_call_talkgroup, work_start_time, d_current_call_freq, d_slot);
+    nchars = snprintf(current_filename, 255, "%s/%ld-%s-%ld_%.0f.%d.wav", temp_path_string.c_str(), d_current_call_talkgroup, source_str.c_str(), work_start_time, d_current_call_freq, d_slot);
   }
   if (nchars >= 255) {
     BOOST_LOG_TRIVIAL(error) << "Call: Path longer than 255 charecters";
@@ -273,6 +274,14 @@ void transmission_sink::close_wav(bool close_call) {
   unsigned int byte_count = d_sample_count * d_bytes_per_sample;
   wavheader_complete(d_fp, byte_count);
   fclose(d_fp);
+  // Rename temporary file to final filename (recompute final in case we have an updated source ID)
+  std::string tmp_filename = std::string(current_filename) + ".tmp";
+  create_filename();
+  boost::system::error_code ec;
+  boost::filesystem::rename(tmp_filename, current_filename, ec);
+  if (ec) {
+    BOOST_LOG_TRIVIAL(error) << "rename(" << tmp_filename << ", " << current_filename << "): " << ec.message();
+  }
   d_fp = NULL;
 }
 
@@ -508,7 +517,8 @@ int transmission_sink::dowork(int noutput_items, gr_vector_const_void_star &inpu
 
     // create a new filename, based on the current time and source.
     create_filename();
-    if (!open_internal(current_filename)) {
+    std::string tmp_filename = std::string(current_filename) + ".tmp";
+    if (!open_internal(tmp_filename.c_str())) {
       BOOST_LOG_TRIVIAL(error) << "can't open file";
       return noutput_items;
     }

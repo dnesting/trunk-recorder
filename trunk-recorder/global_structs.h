@@ -1,5 +1,6 @@
 #ifndef GLOBAL_STRUCTS_H
 #define GLOBAL_STRUCTS_H
+#include <array>
 #include <cstdint>
 #include <ctime>
 #include <string>
@@ -23,6 +24,21 @@ struct Transmission {
   double freq;
   double length;
   std::string filename;
+};
+
+// A positive encryption observation decoded from P25 voice-channel ESS.
+// The recorder generation binds the observation to one decoder assignment;
+// consumers must reject observations from an earlier assignment.
+struct Encryption_Info {
+  bool encrypted = false;
+  uint8_t algid = 0;
+  uint16_t keyid = 0;
+  std::array<uint8_t, 9> mi{};
+  bool phase2_tdma = false;
+  int tdma_slot = -1;
+  long source = -1;
+  long talkgroup = -1;
+  uint64_t recorder_generation = 0;
 };
 
 struct Config {
@@ -139,9 +155,14 @@ struct Call_Data_t {
   long stop_time;
   std::int64_t start_time_ms;
   std::int64_t stop_time_ms;
+  std::int64_t capture_start_time_ms;
   long error_count;
   long spike_count;
   bool encrypted;
+  bool encryption_info_valid = false;
+  uint8_t enc_algid = 0;
+  uint16_t enc_keyid = 0;
+  std::array<uint8_t, 9> enc_mi{};
   bool emergency;
   int priority;
   bool mode;

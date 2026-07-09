@@ -56,6 +56,7 @@ Call_impl::Call_impl(long t, double f, System *s, Config c) {
   phase2_tdma = false;
   tdma_slot = 0;
   encrypted = false;
+  encryption_info_valid = false;
   emergency = false;
   duplex = false;
   mode = false;
@@ -94,6 +95,7 @@ Call_impl::Call_impl(TrunkMessage message, System *s, Config c) {
   phase2_tdma = message.phase2_tdma;
   tdma_slot = message.tdma_slot;
   encrypted = message.encrypted;
+  encryption_info_valid = false;
   emergency = message.emergency;
   duplex = message.duplex;
   mode = message.mode;
@@ -325,6 +327,22 @@ void Call_impl::set_encrypted(bool m) {
 
 bool Call_impl::get_encrypted() {
   return encrypted;
+}
+
+void Call_impl::set_encryption_info(const Encryption_Info &info) {
+  encryption_info = info;
+  encryption_info_valid = info.encrypted;
+  if (info.encrypted) {
+    set_encrypted(true);
+  }
+}
+
+bool Call_impl::has_encryption_info() {
+  return encryption_info_valid;
+}
+
+Encryption_Info Call_impl::get_encryption_info() {
+  return encryption_info;
 }
 
 void Call_impl::set_emergency(bool m) {

@@ -67,6 +67,11 @@ namespace gr {
 		p1fdma.reset_timer();
     }
 
+    void p25_frame_assembler_impl::set_call_generation(uint64_t generation) {
+      p1fdma.set_call_generation(generation);
+      p2tdma.set_call_generation(generation);
+    }
+
     void p25_frame_assembler_impl::set_debug(int debug) {
 		op25audio.set_debug(debug);
 		p1fdma.set_debug(debug);
@@ -131,20 +136,16 @@ static const int MAX_IN = 1;	// maximum number of input streams
 
 
     void p25_frame_assembler_impl::clear() {
-      // clear out the SRC and GRP IDs
-      long clear;
-      clear = p1fdma.get_curr_src_id();
-      clear = p1fdma.get_curr_grp_id();
-      clear = p2tdma.get_ptt_src_id();
-      clear = p2tdma.get_ptt_grp_id();
-      // Reset the vocoder state too. Without this, the smoothed ER, repeat
-      // counter, voicing history, spectral state, and Old/New ping-pong index
-      // all carry across calls. If the previous call ended with ER above the
-      // mute threshold, the next call starts already in mute and produces a
-      // fully-silent recording. (Memsets in the vocoder's clear are scoped
-      // to its own state; safe to call between calls.)
+      std::lock_guard<std::mutex> lock(d_assignment_mutex);
+      // A decoder is reused across calls. Reset all ESS and cached identity
+      // state, the vocoders, and discard decoded output so neither metadata
+      // nor PCM from the previous assignment can leak into the next Call.
+      p1fdma.call_end();
+      p2tdma.call_end();
       p1fdma.clear();
       p2tdma.clear();
+      output_queue.clear();
+      silence_frame_count = 0;
     }
 
     void p25_frame_assembler_impl::set_voice_codec_callback(voice_codec_cb_t cb, void *user_data) {
@@ -196,6 +197,7 @@ p25_frame_assembler_impl::general_work (int noutput_items,
                                gr_vector_const_void_star &input_items,
                                gr_vector_void_star &output_items)
 {
+  std::lock_guard<std::mutex> lock(d_assignment_mutex);
 
   const uint8_t *in = (const uint8_t *) input_items[0];
   std::pair<bool,long> terminate_call = std::make_pair(false, 0);

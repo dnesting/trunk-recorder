@@ -23,6 +23,7 @@
 #define INCLUDED_OP25_REPEATER_P25P1_FDMA_H
 
 #include <gnuradio/msg_queue.h>
+#include <atomic>
 #include <deque>
 
 #include "ezpwd/rs"
@@ -69,7 +70,8 @@ namespace gr {
                 void process_frame();
                 void check_timeout();
                 inline bool encrypted() { return (ess_algid != 0x80); }
-                inline void reset_ess() { ess_algid = 0x80; memset(ess_mi, 0, sizeof(ess_mi)); }
+                inline void reset_ess() { ess_algid = 0x80; ess_keyid = 0; memset(ess_mi, 0, sizeof(ess_mi)); }
+                void send_encryption_info(long source, long talkgroup);
                 void send_msg(const std::string msg_str, long msg_type);
 
                 // internal instance variables and state
@@ -115,6 +117,7 @@ namespace gr {
                 uint8_t ess_algid;
                 uint8_t  ess_mi[9] = {0};
                 uint16_t vf_tgid;
+                std::atomic<uint64_t> d_call_generation;
 
                 imbe_vocoder vocoder; // for original full rate vocoder
 
@@ -124,6 +127,7 @@ namespace gr {
 
             public:
                 void set_voice_codec_callback(voice_codec_cb_t cb, void *user_data) { voice_codec_cb_ = cb; voice_codec_cb_data_ = user_data; }
+                void set_call_generation(uint64_t generation) { d_call_generation.store(generation); }
                 void set_debug(int debug);
                 void set_nac(int nac);
                 void reset_timer();

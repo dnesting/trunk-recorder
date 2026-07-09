@@ -16,7 +16,9 @@ p25_recorder_decode_sptr make_p25_recorder_decode(Recorder *recorder, int silenc
 p25_recorder_decode::p25_recorder_decode(Recorder *recorder)
     : gr::hier_block2("p25_recorder_decode",
                       gr::io_signature::make(1, 1, sizeof(float)),
-                      gr::io_signature::make(0, 0, sizeof(float))) {
+                      gr::io_signature::make(0, 0, sizeof(float))),
+      d_call(NULL),
+      d_call_generation(0) {
   d_recorder = recorder;
 }
 
@@ -24,12 +26,22 @@ p25_recorder_decode::~p25_recorder_decode() {
 }
 
 void p25_recorder_decode::stop() {
-  wav_sink->stop_recording();
   d_call = NULL;
+  reset_assignment_state();
+  wav_sink->stop_recording();
 }
 
 void p25_recorder_decode::start(Call *call) {
+  d_call = NULL;
+  reset_assignment_state();
+  ++d_call_generation;
+  if (d_call_generation == 0) {
+    ++d_call_generation;
+  }
+  op25_frame_assembler->set_call_generation(d_call_generation);
   levels->set_k(call->get_system()->get_digital_levels());
+
+  d_call = call;
 
   if(call->get_phase2_tdma()){
     wav_sink->start_recording(call, call->get_tdma_slot());
@@ -37,7 +49,14 @@ void p25_recorder_decode::start(Call *call) {
     wav_sink->start_recording(call);
   }
   
-  d_call = call;
+}
+
+void p25_recorder_decode::reset_assignment_state() {
+  op25_frame_assembler->set_call_generation(0);
+  op25_frame_assembler->clear();
+  if (rx_queue) {
+    rx_queue->flush();
+  }
 }
 
 void p25_recorder_decode::set_xor_mask(const char *mask) {
@@ -150,7 +169,7 @@ void p25_recorder_decode::reset() {
   reset_block(slicer);
   reset_block(levels);
   reset_block(wav_sink);*/
-  op25_frame_assembler->clear();
+  reset_assignment_state();
 }
 
 gr::op25_repeater::p25_frame_assembler::sptr p25_recorder_decode::get_transmission_sink() {
@@ -318,6 +337,8 @@ void p25_recorder_decode::check_message_queue() {
           if (json_msg_type == "motorola_alias_p1" || json_msg_type == "motorola_alias_p2" ||
               json_msg_type == "harris_alias_p1" || json_msg_type == "harris_alias_p2") {
             handle_alias_message(j);
+          } else if (json_msg_type == "encryption_info") {
+            handle_encryption_message(j);
           }
           // Add some more JSON handlers as we find other things to decode!
         }
@@ -327,4 +348,54 @@ void p25_recorder_decode::check_message_queue() {
       }
     }
   }
+}
+
+void p25_recorder_decode::handle_encryption_message(const nlohmann::json& j) {
+  Call *call = d_call;
+  if (!call || !j.value("encrypted", false)) {
+    return;
+  }
+
+  const uint64_t generation = j.value("generation", uint64_t{0});
+  if (generation == 0 || generation != d_call_generation) {
+    BOOST_LOG_TRIVIAL(debug) << "Discarding stale P25 encryption metadata generation "
+                             << generation << ", active " << d_call_generation;
+    return;
+  }
+
+  Encryption_Info info;
+  info.encrypted = true;
+  info.algid = static_cast<uint8_t>(j.value("algid", 0));
+  info.keyid = static_cast<uint16_t>(j.value("keyid", 0));
+  info.phase2_tdma = j.value("phase2_tdma", false);
+  info.tdma_slot = j.value("tdma_slot", -1);
+  info.source = j.value("srcaddr", long{-1});
+  info.talkgroup = j.value("grpaddr", long{-1});
+  info.recorder_generation = generation;
+
+  if (info.algid == 0x80 || info.phase2_tdma != call->get_phase2_tdma() ||
+      (info.phase2_tdma && info.tdma_slot != call->get_tdma_slot()) ||
+      (info.talkgroup > 0 && info.talkgroup != call->get_talkgroup()) ||
+      (info.source > 0 && call->get_current_source_id() > 0 &&
+       info.source != call->get_current_source_id())) {
+    BOOST_LOG_TRIVIAL(debug) << "Discarding P25 encryption metadata that does not match active call";
+    return;
+  }
+
+  const std::string mi = j.value("mi", std::string{});
+  if (mi.size() != info.mi.size() * 2) {
+    BOOST_LOG_TRIVIAL(debug) << "Discarding P25 encryption metadata with invalid MI";
+    return;
+  }
+  try {
+    for (size_t i = 0; i < info.mi.size(); ++i) {
+      info.mi[i] = static_cast<uint8_t>(std::stoul(mi.substr(i * 2, 2), nullptr, 16));
+    }
+  } catch (const std::exception&) {
+    BOOST_LOG_TRIVIAL(debug) << "Discarding P25 encryption metadata with malformed MI";
+    return;
+  }
+
+  call->set_encryption_info(info);
+  plugman_encryption_info(call, info);
 }

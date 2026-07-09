@@ -29,6 +29,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <deque>
+#include <mutex>
 #include <boost/log/trivial.hpp>
 
 #include "p25p1_fdma.h"
@@ -53,6 +54,7 @@ namespace gr {
 	p25p2_tdma p2tdma;
 	bool d_do_msgq;
 	gr::msg_queue::sptr d_msg_queue;
+	std::mutex d_assignment_mutex;
 
   int d_input_rate;
   int d_silence_frames;
@@ -73,7 +75,8 @@ namespace gr {
 	std::deque<int16_t> output_queue;
 
   void p25p2_queue_msg(int duid);
-  void set_phase2_tdma(bool p);
+	void set_phase2_tdma(bool p);
+	void set_call_generation(uint64_t generation);
 
 public:
       p25_frame_assembler_impl(int silence_frames, bool soft_vocoder, const char* udp_host, int port, int debug, bool do_imbe, bool do_output, bool do_msgq, gr::msg_queue::sptr queue, bool do_audio_output, bool do_phase2_tdma, bool do_nocrypt);

@@ -719,12 +719,22 @@ This plugin does not, by itself, stream audio to any online services.  Because i
 | address   |          |               | string               | **Deprecated.** Use `url` instead. IP address or hostname to send this audio stream to. |
 | port      |          |               | number               | **Deprecated.** Use `url` instead. UDP or TCP port that this stream will send audio to. |
 | TGID      |    ✓     |               | number               | Audio from this Talkgroup ID will be sent on this stream.  Set to 0 to stream all recorded talkgroups. |
-| sendJSON  |          |     false     | **true** / **false** | When set to true, JSON metadata will be prepended to the audio data each time a packet is sent.  JSON fields are talkgroup, patched_talkgroups, src, src_tag, freq, audio_sample_rate, short_name, event (set to "audio").  The length of the JSON metadata is prepended to the metadata in long integer format (4 bytes, little endian). If this is set to **true**, the sendTGID field will be ignored. |
+| receiverId |         | `shortName`   | string               | Stable identifier for this SDR/trunk-recorder capture path. Set a different value on each independent receiver feeding the same proxy. |
+| sendJSON  |          |     false     | **true** / **false** | When true, every packet is `uint32 little-endian JSON length`, JSON metadata, then `payload_length` bytes of PCM. Transmission-v2 metadata includes receiver/capture identity, P25 phase/slot, sequence/sample position, encryption observations, and corrected-codec fingerprints. If true, sendTGID is ignored. |
 | sendCallStart |      | false         | **true** / **false** | Only used if sendJSON is set to **true**.  When set to true, a JSON message will be sent at the start of each call that includes the following JSON fields: talkgroup, talkgroup_tag, patched_talkgroups, patched_talkgroup_tags, src, src_tag, freq, short_name, event (set to "call_start").  The length of the JSON metadata is prepended to the metadata in long integer format (4 bytes, little endian).
 | sendCallEnd |      | false         | **true** / **false** | Only used if sendJSON is set to **true**.  When set to true, a JSON message will be sent at the end of each call that includes the following JSON fields: talkgroup, patched_talkgroups, freq, short_name, event (set to "call_end").  The length of the JSON metadata is prepended to the metadata in long integer format (4 bytes, little endian).
 | sendTGID  |          |     false     | **true** / **false** | Deprecated.  Recommend using sendJSON for metadata instead.  If sendJSON is set to true, this setting will be ignored.  When set to true, the TGID will be prepended in long integer format (4 bytes, little endian) to the audio data each time a packet is sent. |
 | shortName |          |               | string               | shortName of the System that audio should be streamed for.  This should match the shortName of a system that is defined in the main section of the config file.  When omitted, all Systems will be streamed to the address and port configured.  If TGIDs from Systems overlap, JSON metadata should be used to prevent interleaved audio for talkgroups from different Systems with the same TGID.
 |  useTCP   |          |     false     | **true** / **false** | **Deprecated.** Use `url` instead. When set to true, TCP will be used instead of UDP. Ignored if `url` is set — the protocol is determined by the URL scheme instead.
+
+With JSON enabled, `call_start`, `audio`, `enc_info`, and `call_end` carry
+`receiver_id`, producer-local `capture_id`, `timestamp_ms`, `payload_length`,
+`phase2_tdma`, and `tdma_slot` for Phase 2. Audio adds `seq`, `start_sample`,
+and `voice_fingerprints`. A positive traffic-channel encryption observation
+emits `enc_info` with `algid`, `keyid`, and the 72-bit hexadecimal `mi`; those
+confirmed fields are repeated on subsequent events. The preliminary
+`encrypted` value on `call_start` remains a claim from the control channel or
+talkgroup configuration.
 
 ###### Plugin Object Example #1:
 This example will stream audio from talkgroup 58914 on system "CountyTrunked" to the local machine on UDP port 9123.
@@ -791,7 +801,8 @@ This example will stream audio from all talkgroups being recorded on System Coun
             "address":"127.0.0.1",
             "port":9123,
             "sendJSON":true,
-            "shortName":"CountyTrunked"}
+            "shortName":"CountyTrunked",
+            "receiverId":"county-sdr-1"}
         }
 ```
 ##### Example - Sending Audio to pulseaudio

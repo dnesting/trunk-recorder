@@ -62,6 +62,7 @@ public:
   // rx_sync slot tracking; for D-STAR/YSF they are 0. Use call->get_talkgroup() and
   // call->get_current_source_id() for authoritative values across all codec types.
   virtual int voice_codec_data(Call *call, int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs) { return 0; };
+  virtual int encryption_info(Call *call, const Encryption_Info &info) { return 0; };
   //void set_frequency_format(int f) { frequencyFormat = f; }
   virtual ~Plugin_Api(){};
 };

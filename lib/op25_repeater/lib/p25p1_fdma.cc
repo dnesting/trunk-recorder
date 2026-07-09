@@ -31,6 +31,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
+#include <iomanip>
+#include <sstream>
 #include <vector>
 #include "bch.h"
 #include "op25_msg_types.h"
@@ -231,6 +233,7 @@ namespace gr {
             cached_id_timestamp(0),
             ess_algid(0x80),
             vf_tgid(0),
+			d_call_generation(0),
 			terminate_call(std::pair<bool,long>(false,0)),
             p1voice_decode((debug > 0), udp, output_queue),
             voice_codec_cb_(NULL),
@@ -336,6 +339,9 @@ namespace gr {
                             vf_tgid, MFID, ess_algid, ess_keyid,
                             ess_mi[0], ess_mi[1], ess_mi[2], ess_mi[3], ess_mi[4], ess_mi[5],ess_mi[6], ess_mi[7], ess_mi[8]);
                 }
+                if (encrypted()) {
+                    send_encryption_info(cached_src_id, vf_tgid);
+                }
             }
 
             if (d_debug >= 10) {
@@ -415,6 +421,9 @@ namespace gr {
                 ess_algid = next_algid;
                 ess_keyid = next_keyid;
                 memcpy(ess_mi, next_mi, sizeof(next_mi));
+                if (encrypted()) {
+                    send_encryption_info(cached_src_id, cached_grp_id);
+                }
             }
         }
 
@@ -935,8 +944,6 @@ namespace gr {
                                     output_queue.push_back(0);  // Silent frame
                                 }
                             }
-                            std::string encr = "{\"encrypted\": " + std::to_string(1) + ", \"algid\": " + std::to_string(ess_algid) + ", \"keyid\": " + std::to_string(ess_keyid) + "}";
-                            send_msg(encr, M_P25_JSON_DATA);
                         }
                     }
 
@@ -979,6 +986,26 @@ namespace gr {
 
             if (!d_msg_queue->full_p())
                 d_msg_queue->insert_tail(msg);
+        }
+
+        void p25p1_fdma::send_encryption_info(long source, long talkgroup) {
+            std::ostringstream mi;
+            mi << std::hex << std::setfill('0');
+            for (uint8_t byte : ess_mi) {
+                mi << std::setw(2) << static_cast<unsigned int>(byte);
+            }
+            std::ostringstream msg;
+            msg << "{\"type\":\"encryption_info\",\"encrypted\":true"
+                << ",\"algid\":" << static_cast<unsigned int>(ess_algid)
+                << ",\"keyid\":" << ess_keyid
+                << ",\"mi\":\"" << mi.str() << "\""
+                << ",\"phase2_tdma\":false"
+                << ",\"tdma_slot\":-1"
+                << ",\"srcaddr\":" << source
+                << ",\"grpaddr\":" << talkgroup
+                << ",\"generation\":" << d_call_generation.load()
+                << "}";
+            send_msg(msg.str(), M_P25_JSON_DATA);
         }
 
         void p25p1_fdma::process_frame() {

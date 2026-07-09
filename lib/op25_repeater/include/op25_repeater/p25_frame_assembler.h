@@ -26,6 +26,7 @@
 #include <op25_repeater/api.h>
 #include <gnuradio/block.h>
 #include <gnuradio/msg_queue.h>
+#include <cstdint>
 
 namespace gr {
   namespace op25_repeater {
@@ -62,6 +63,7 @@ namespace gr {
       virtual void crypt_reset(void) {}
       virtual void crypt_key(uint16_t keyid, uint8_t algid, const std::vector<uint8_t> &key) {}
       virtual void set_phase2_tdma(bool p) {}
+      virtual void set_call_generation(uint64_t generation) {}
       virtual void clear() {};
       virtual  void clear_silence_frame_count() {};
       typedef void (*voice_codec_cb_t)(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, void *user_data);
@@ -72,4 +74,3 @@ namespace gr {
 } // namespace gr
 
 #endif /* INCLUDED_OP25_REPEATER_P25_FRAME_ASSEMBLER_H */
-

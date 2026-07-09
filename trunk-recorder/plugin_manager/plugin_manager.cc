@@ -361,3 +361,12 @@ void plugman_voice_codec_data(Call *call, int codec_type, long tgid, uint32_t sr
     }
   }
 }
+
+void plugman_encryption_info(Call *call, const Encryption_Info &info) {
+  for (std::vector<Plugin *>::iterator it = plugins.begin(); it != plugins.end(); it++) {
+    Plugin *plugin = *it;
+    if (plugin->state == PLUGIN_RUNNING) {
+      plugin->api->encryption_info(call, info);
+    }
+  }
+}

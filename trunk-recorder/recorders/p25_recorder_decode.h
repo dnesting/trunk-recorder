@@ -44,6 +44,7 @@ protected:
   virtual void initialize(int silence_frames, bool d_soft_vocoder);
   Recorder *d_recorder;
   Call *d_call;
+  uint64_t d_call_generation;
   gr::op25_repeater::p25_frame_assembler::sptr op25_frame_assembler;
   gr::msg_queue::sptr traffic_queue;
   gr::msg_queue::sptr rx_queue;
@@ -77,6 +78,8 @@ public:
 
 private:
   void handle_alias_message(const nlohmann::json& j);
+  void handle_encryption_message(const nlohmann::json& j);
+  void reset_assignment_state();
   static void voice_codec_cb_handler(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, void *user_data);
 };
 #endif

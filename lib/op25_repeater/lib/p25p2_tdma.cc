@@ -23,6 +23,8 @@
 #include <string.h>
 #include <string>
 #include <iostream>
+#include <iomanip>
+#include <sstream>
 #include <assert.h>
 #include <errno.h>
 #include <sys/time.h>
@@ -122,9 +124,10 @@ p25p2_tdma::p25p2_tdma(const op25_audio& udp, log_ts& logger, int slotid, int de
 	ESS_B(16,0),
 	ess_keyid(0),
 	ess_algid(0x80),
-	next_keyid(0),
-	next_algid(0x80),
-	p2framer(),
+		next_keyid(0),
+		next_algid(0x80),
+		d_call_generation(0),
+		p2framer(),
     crypt_algs(logger, debug, msgq_id),
     src_id(-1),
     grp_id(-1),
@@ -305,9 +308,12 @@ void p25p2_tdma::handle_mac_ptt(const uint8_t byte_buf[], const unsigned int len
 		}
 		src_id = srcaddr;
 		grp_id = grpaddr;
-		cached_src_id = srcaddr;  // Update persistent cache
-		cached_grp_id = grpaddr;  // Update persistent cache
-		cached_id_timestamp = get_time_ms();  // Record when IDs were cached
+			cached_src_id = srcaddr;  // Update persistent cache
+			cached_grp_id = grpaddr;  // Update persistent cache
+			cached_id_timestamp = get_time_ms();  // Record when IDs were cached
+			if (encrypted()) {
+				send_encryption_info(srcaddr, grpaddr);
+			}
 
 		std::string s = "{\"srcaddr\" : " + std::to_string(srcaddr) + ", \"grpaddr\": " + std::to_string(grpaddr) + "}";
         send_msg(s, -3);
@@ -892,8 +898,9 @@ int p25p2_tdma::handle_packet(uint8_t dibits[], const uint64_t fs)
 			if (encrypted()) {
 				crypt_algs.prepare(ess_algid, ess_keyid, PT_P25_PHASE2, ess_mi);
 			}
-			std::string s = "{\"encrypted\": " + std::to_string((encrypted()) ? 1 : 0) + ", \"algid\": " + std::to_string(ess_algid) + ", \"keyid\": " + std::to_string(ess_keyid) + "}";
-			send_msg(s, M_P25_JSON_DATA);
+				if (encrypted()) {
+					send_encryption_info(cached_src_id, cached_grp_id);
+				}
 		}
 		return -1;
 	} else if (burst_type == 3) {                   // scrambled sacch
@@ -972,6 +979,27 @@ void p25p2_tdma::send_msg(const std::string msg_str, long msg_type)
 		return;
 
 	gr::message::sptr msg = gr::message::make_from_string(msg_str, msg_type, 0, 0);           
-    if (!d_msg_queue->full_p())
+	if (!d_msg_queue->full_p())
     	d_msg_queue->insert_tail(msg);
+}
+
+void p25p2_tdma::send_encryption_info(long source, long talkgroup)
+{
+	std::ostringstream mi;
+	mi << std::hex << std::setfill('0');
+	for (uint8_t byte : ess_mi) {
+		mi << std::setw(2) << static_cast<unsigned int>(byte);
+	}
+	std::ostringstream msg;
+	msg << "{\"type\":\"encryption_info\",\"encrypted\":true"
+		<< ",\"algid\":" << static_cast<unsigned int>(ess_algid)
+		<< ",\"keyid\":" << ess_keyid
+		<< ",\"mi\":\"" << mi.str() << "\""
+		<< ",\"phase2_tdma\":true"
+		<< ",\"tdma_slot\":" << d_slotid
+		<< ",\"srcaddr\":" << source
+		<< ",\"grpaddr\":" << talkgroup
+		<< ",\"generation\":" << d_call_generation.load()
+		<< "}";
+	send_msg(msg.str(), M_P25_JSON_DATA);
 }

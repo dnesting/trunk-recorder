@@ -71,6 +71,9 @@ public:
   virtual bool is_conventional() = 0;
   virtual void set_encrypted(bool m) = 0;
   virtual bool get_encrypted() = 0;
+  virtual void set_encryption_info(const Encryption_Info &info) = 0;
+  virtual bool has_encryption_info() = 0;
+  virtual Encryption_Info get_encryption_info() = 0;
   virtual void set_emergency(bool m) = 0;
   virtual bool get_emergency() = 0;
   virtual int get_priority() = 0;

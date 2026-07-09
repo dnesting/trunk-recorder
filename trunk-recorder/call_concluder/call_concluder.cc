@@ -1079,6 +1079,13 @@ Call_Data_t Call_Concluder::create_call_data(Call *call, System *sys, const Conf
   call_info.recorder_num         = call->get_recorder()->get_num();
   call_info.source_num           = call->get_recorder()->get_source()->get_num();
   call_info.encrypted            = call->get_encrypted();
+  call_info.encryption_info_valid = call->has_encryption_info();
+  if (call_info.encryption_info_valid) {
+    Encryption_Info info = call->get_encryption_info();
+    call_info.enc_algid = info.algid;
+    call_info.enc_keyid = info.keyid;
+    call_info.enc_mi = info.mi;
+  }
   call_info.emergency            = call->get_emergency();
   call_info.priority             = call->get_priority();
   call_info.mode                 = call->get_mode();
@@ -1093,6 +1100,7 @@ Call_Data_t Call_Concluder::create_call_data(Call *call, System *sys, const Conf
   call_info.transmission_archive = sys->get_transmission_archive();
   call_info.call_log             = sys->get_call_log();
   call_info.call_num             = call->get_call_num();
+  call_info.capture_start_time_ms = call->get_start_time_ms();
   call_info.compress_wav         = sys->get_compress_wav();
   call_info.audio_bitrate        = sys->get_audio_bitrate();
 

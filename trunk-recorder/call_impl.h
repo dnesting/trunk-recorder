@@ -72,6 +72,9 @@ public:
   bool is_conventional() { return false; }
   void set_encrypted(bool m);
   bool get_encrypted();
+  void set_encryption_info(const Encryption_Info &info);
+  bool has_encryption_info();
+  Encryption_Info get_encryption_info();
   void set_emergency(bool m);
   bool get_emergency();
   int get_priority();
@@ -121,6 +124,8 @@ protected:
   bool sigmf_recording;
   bool was_update;
   bool encrypted;
+  bool encryption_info_valid;
+  Encryption_Info encryption_info;
   bool emergency;
   bool mode;
   bool duplex;

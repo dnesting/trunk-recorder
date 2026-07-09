@@ -22,6 +22,7 @@
 #define INCLUDED_P25P2_TDMA_H
 
 #include <stdint.h>
+#include <atomic>
 #include <deque>
 #include <vector>
 #include <gnuradio/msg_queue.h>
@@ -62,6 +63,7 @@ public:
 	void reset_call_terminated();
 	long get_ptt_src_id();
 	long get_ptt_grp_id();
+	void set_call_generation(uint64_t generation) { d_call_generation.store(generation); }
 private:
 	p25p2_sync sync;
 	p25p2_duid duid;
@@ -111,6 +113,7 @@ private:
 	uint16_t next_keyid;
 	uint8_t next_algid;
 	uint8_t next_mi[9] = {0};
+	std::atomic<uint64_t> d_call_generation;
 
 	p25p2_framer p2framer;
     p25_crypt_algs crypt_algs;
@@ -128,7 +131,15 @@ private:
     void convert_abbrev_msg(const uint8_t byte_buf[], const uint16_t nac, const uint8_t mfid = 0x00);
 	void handle_4V2V_ess(const uint8_t dibits[]);
 	inline bool encrypted() { return (ess_algid != 0x80); }
-    inline void reset_ess() { ess_algid = 0x80; memset(ess_mi, 0, sizeof(ess_mi)); }
+    inline void reset_ess() {
+		ess_algid = 0x80;
+		ess_keyid = 0;
+		next_algid = 0x80;
+		next_keyid = 0;
+		memset(ess_mi, 0, sizeof(ess_mi));
+		memset(next_mi, 0, sizeof(next_mi));
+	}
+	void send_encryption_info(long source, long talkgroup);
 
 	void send_msg(const std::string msg_str, long msg_type);
 

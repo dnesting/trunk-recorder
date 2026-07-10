@@ -69,6 +69,7 @@ public:
   const char *get_xor_mask();
   virtual time_t get_start_time() { return start_time; }
   virtual std::int64_t get_start_time_ms();
+  virtual std::int64_t get_capture_start_time_ms() { return start_time_ms; }
   bool is_conventional() { return false; }
   void set_encrypted(bool m);
   bool get_encrypted();

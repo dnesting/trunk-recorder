@@ -156,7 +156,7 @@ class Simple_Stream : public Plugin_Api {
     object["receiver_id"] = stream.receiver_id;
     object["capture_id"] = capture_id(
         stream.receiver_id, call->get_short_name(), call->get_call_num(),
-        call->get_start_time_ms(), call->get_phase2_tdma(),
+        call->get_capture_start_time_ms(), call->get_phase2_tdma(),
         call->get_tdma_slot());
     object["short_name"] = call->get_short_name();
     object["talkgroup"] = call->get_talkgroup();

@@ -86,11 +86,11 @@ class Simple_Stream : public Plugin_Api {
 
   static std::string capture_id(const std::string &receiver_id,
                                 const std::string &short_name,
-                                long call_num, int64_t start_ms, long source,
+                                long call_num, int64_t start_ms,
                                 bool phase2, int slot) {
     std::ostringstream out;
     out << receiver_id << '/' << short_name << '/' << start_ms << '/'
-        << call_num << '/' << source << '/' << (phase2 ? 2 : 1) << '/'
+        << call_num << '/' << (phase2 ? 2 : 1) << '/'
         << (phase2 ? slot : -1);
     return out.str();
   }
@@ -156,7 +156,7 @@ class Simple_Stream : public Plugin_Api {
     object["receiver_id"] = stream.receiver_id;
     object["capture_id"] = capture_id(
         stream.receiver_id, call->get_short_name(), call->get_call_num(),
-        call->get_start_time_ms(), source, call->get_phase2_tdma(),
+        call->get_start_time_ms(), call->get_phase2_tdma(),
         call->get_tdma_slot());
     object["short_name"] = call->get_short_name();
     object["talkgroup"] = call->get_talkgroup();
@@ -174,7 +174,7 @@ class Simple_Stream : public Plugin_Api {
     object["receiver_id"] = stream.receiver_id;
     object["capture_id"] = capture_id(
         stream.receiver_id, call_info.short_name, call_info.call_num,
-        call_info.capture_start_time_ms, source, call_info.phase2_tdma,
+        call_info.capture_start_time_ms, call_info.phase2_tdma,
         call_info.tdma_slot);
     object["short_name"] = call_info.short_name;
     object["talkgroup"] = call_info.talkgroup;

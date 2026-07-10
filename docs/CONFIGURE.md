@@ -730,7 +730,9 @@ This plugin does not, by itself, stream audio to any online services.  Because i
 With JSON enabled, `call_start`, `audio`, `enc_info`, and `call_end` carry
 `receiver_id`, producer-local `capture_id`, `timestamp_ms`, `payload_length`,
 `phase2_tdma`, and `tdma_slot` for Phase 2. Audio adds `seq`, `start_sample`,
-and `voice_fingerprints`. A positive traffic-channel encryption observation
+and `voice_fingerprints`. `capture_id` identifies the recorder assignment and
+is stable when the decoded source unit changes; `src` identifies the unit for
+the current transmission. A positive traffic-channel encryption observation
 emits `enc_info` with `algid`, `keyid`, and the 72-bit hexadecimal `mi`; those
 confirmed fields are repeated on subsequent events. The preliminary
 `encrypted` value on `call_start` remains a claim from the control channel or

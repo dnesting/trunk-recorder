@@ -41,6 +41,11 @@ public:
   virtual int audio_stream(Call *call, Recorder *recorder, int16_t *samples, int sampleCount) { return 0; };
   virtual int trunk_message(std::vector<TrunkMessage> messages, System *system) { return 0; };
   virtual int call_start(Call *call) { return 0; };
+  // Called exactly once after the recorder has stopped and every in-progress
+  // audio_stream callback has returned, but before asynchronous call artifact
+  // processing. This is the real-time streaming lifecycle boundary; call_end
+  // remains the post-processing/upload plugin hook.
+  virtual int capture_end(Call *call, Call_Data_t call_info) { return 0; };
   virtual int call_end(Call_Data_t call_info) { return 0; }; //= 0; //{ BOOST_LOG_TRIVIAL(info) << "plugin_api call_end"; return 0; };
   virtual int calls_active(std::vector<Call *> calls) { return 0; };
   virtual int setup_recorder(Recorder *recorder) { return 0; };

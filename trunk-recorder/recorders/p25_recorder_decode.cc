@@ -26,13 +26,19 @@ p25_recorder_decode::~p25_recorder_decode() {
 }
 
 void p25_recorder_decode::stop() {
-  d_call = NULL;
+  {
+    std::lock_guard<std::mutex> lock(plugin_callback_mutex);
+    d_call = NULL;
+  }
   reset_assignment_state();
   wav_sink->stop_recording();
 }
 
 void p25_recorder_decode::start(Call *call) {
-  d_call = NULL;
+  {
+    std::lock_guard<std::mutex> lock(plugin_callback_mutex);
+    d_call = NULL;
+  }
   reset_assignment_state();
   ++d_call_generation;
   if (d_call_generation == 0) {
@@ -41,7 +47,10 @@ void p25_recorder_decode::start(Call *call) {
   op25_frame_assembler->set_call_generation(d_call_generation);
   levels->set_k(call->get_system()->get_digital_levels());
 
-  d_call = call;
+  {
+    std::lock_guard<std::mutex> lock(plugin_callback_mutex);
+    d_call = call;
+  }
 
   if(call->get_phase2_tdma()){
     wav_sink->start_recording(call, call->get_tdma_slot());
@@ -139,6 +148,7 @@ void p25_recorder_decode::initialize(int silence_frames, bool d_soft_vocoder) {
 }
 
 void p25_recorder_decode::plugin_callback_handler(int16_t *samples, int sampleCount) {
+  std::lock_guard<std::mutex> lock(plugin_callback_mutex);
   if (d_call) {
     plugman_audio_callback(d_call, d_recorder, samples, sampleCount);
   }

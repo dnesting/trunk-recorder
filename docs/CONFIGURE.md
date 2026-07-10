@@ -722,12 +722,12 @@ This plugin does not, by itself, stream audio to any online services.  Because i
 | receiverId |         | `shortName`   | string               | Stable identifier for this SDR/trunk-recorder capture path. Set a different value on each independent receiver feeding the same proxy. |
 | sendJSON  |          |     false     | **true** / **false** | When true, every packet is `uint32 little-endian JSON length`, JSON metadata, then `payload_length` bytes of PCM. Transmission-v2 metadata includes receiver/capture identity, P25 phase/slot, sequence/sample position, encryption observations, and corrected-codec fingerprints. If true, sendTGID is ignored. |
 | sendCallStart |      | false         | **true** / **false** | Only used if sendJSON is set to **true**.  When set to true, a JSON message will be sent at the start of each call that includes the following JSON fields: talkgroup, talkgroup_tag, patched_talkgroups, patched_talkgroup_tags, src, src_tag, freq, short_name, event (set to "call_start").  The length of the JSON metadata is prepended to the metadata in long integer format (4 bytes, little endian).
-| sendCallEnd |      | false         | **true** / **false** | Only used if sendJSON is set to **true**.  When set to true, a JSON message will be sent at the end of each call that includes the following JSON fields: talkgroup, patched_talkgroups, freq, short_name, event (set to "call_end").  The length of the JSON metadata is prepended to the metadata in long integer format (4 bytes, little endian).
+| sendCallEnd |      | false         | **true** / **false** | Only used if sendJSON is set to **true**. When true, a `capture_end` JSON message is sent after the recorder has stopped and all in-progress PCM callbacks have returned. It includes the common capture identity, `final_seq`, `sample_count`, and `synthesized` (false for producer events). The length of the JSON metadata is prepended in 4-byte little-endian format. |
 | sendTGID  |          |     false     | **true** / **false** | Deprecated.  Recommend using sendJSON for metadata instead.  If sendJSON is set to true, this setting will be ignored.  When set to true, the TGID will be prepended in long integer format (4 bytes, little endian) to the audio data each time a packet is sent. |
 | shortName |          |               | string               | shortName of the System that audio should be streamed for.  This should match the shortName of a system that is defined in the main section of the config file.  When omitted, all Systems will be streamed to the address and port configured.  If TGIDs from Systems overlap, JSON metadata should be used to prevent interleaved audio for talkgroups from different Systems with the same TGID.
 |  useTCP   |          |     false     | **true** / **false** | **Deprecated.** Use `url` instead. When set to true, TCP will be used instead of UDP. Ignored if `url` is set — the protocol is determined by the URL scheme instead.
 
-With JSON enabled, `call_start`, `audio`, `enc_info`, and `call_end` carry
+With JSON enabled, `call_start`, `audio`, `enc_info`, and `capture_end` carry
 `receiver_id`, producer-local `capture_id`, `timestamp_ms`, `payload_length`,
 `phase2_tdma`, and `tdma_slot` for Phase 2. Audio adds `seq`, `start_sample`,
 and `voice_fingerprints`. `capture_id` identifies the recorder assignment and
@@ -738,6 +738,15 @@ emits `enc_info` with `algid`, `keyid`, and the 72-bit hexadecimal `mi`; those
 confirmed fields are repeated on subsequent events. The preliminary
 `encrypted` value on `call_start` remains a claim from the control channel or
 talkgroup configuration.
+
+`capture_end` is the real-time streaming boundary. It is emitted before
+asynchronous call artifact processing, including on calls that artifact
+filters later discard. `final_seq` is the last audio packet sequence number
+and `sample_count` is the number of clear PCM samples offered to the stream for
+the final source transmission. Consumers can compare these counters with what
+they received to detect loss of the final datagram. The plugin does not emit
+the legacy post-processing `call_end`, which may occur much later or be skipped
+on filtered calls.
 
 ###### Plugin Object Example #1:
 This example will stream audio from talkgroup 58914 on system "CountyTrunked" to the local machine on UDP port 9123.

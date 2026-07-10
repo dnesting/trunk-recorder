@@ -1240,6 +1240,13 @@ Call_Data_t Call_Concluder::create_call_data(Call *call, System *sys, const Conf
 
 void Call_Concluder::conclude_call(Call *call, System *sys, const Config &config) {
   Call_Data_t call_info = create_call_data(call, sys, config);
+  // Streaming consumers need the recorder boundary immediately and on every
+  // conclusion path. The legacy call_end hook runs later in the artifact
+  // worker and is intentionally allowed to retry; it is not a wire-lifecycle
+  // event. Call_impl stopped the recorder before entering here, and the P25
+  // decoder's callback barrier guarantees all in-progress PCM callbacks have
+  // returned before this event is delivered.
+  plugman_capture_end(call, call_info);
   const std::string loghdr =
       log_header(call_info.short_name, call_info.call_num, call_info.talkgroup_display, call_info.freq);
 

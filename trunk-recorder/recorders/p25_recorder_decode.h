@@ -8,6 +8,7 @@
 #include <gnuradio/hier_block2.h>
 #include <gnuradio/io_signature.h>
 #include <gnuradio/msg_queue.h>
+#include <mutex>
 
 #include <op25_repeater/fsk4_slicer_fb.h>
 #include <op25_repeater/costas_loop_cc.h>
@@ -53,6 +54,10 @@ protected:
   gr::blocks::multiply_const_ss::sptr levels;
   gr::blocks::transmission_sink::sptr wav_sink;
   gr::blocks::plugin_wrapper::sptr plugin_sink;
+  // Serializes call assignment changes with PCM callbacks. Once stop()
+  // returns, no audio_stream callback for the old capture can still be in
+  // progress or begin later.
+  std::mutex plugin_callback_mutex;
 
 public:
   p25_recorder_decode(Recorder *recorder);

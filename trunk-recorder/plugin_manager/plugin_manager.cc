@@ -177,6 +177,20 @@ int plugman_call_start(Call *call) {
   return error;
 }
 
+void plugman_capture_end(Call *call, Call_Data_t& call_info) {
+  for (std::vector<Plugin *>::iterator it = plugins.begin(); it != plugins.end(); it++) {
+    Plugin *plugin = *it;
+    if (plugin->state == PLUGIN_RUNNING) {
+      const int error = plugin->api->capture_end(call, call_info);
+      if (error) {
+        BOOST_LOG_TRIVIAL(error) << "[" << call_info.short_name << "]\t"
+                                 << call_info.call_num << "C\tPlugin Manager: capture_end - "
+                                 << plugin->name << " failed; the event is not retried";
+      }
+    }
+  }
+}
+
 int plugman_call_end(Call_Data_t& call_info) {
   std::vector<int> plugin_retry_list;
   

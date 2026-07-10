@@ -71,13 +71,6 @@ class Simple_Stream : public Plugin_Api {
     return source;
   }
 
-  static long final_source(const Call_Data_t &call_info) {
-    if (!call_info.transmission_list.empty()) {
-      return call_info.transmission_list.back().source;
-    }
-    return -1;
-  }
-
   static capture_key key_for(Call *call, long source) {
     return std::make_tuple(call->get_call_num(), source,
                            call->get_phase2_tdma(),
@@ -448,14 +441,29 @@ public:
     return 0;
   }
 
-  int call_end(Call_Data_t call_info) override {
-    const long source = final_source(call_info);
+  int capture_end(Call *call, Call_Data_t call_info) override {
+    const long source = current_source(call);
     std::vector<long> patched;
     for (unsigned long group : call_info.patched_talkgroups) {
       patched.push_back(static_cast<long>(group));
     }
     if (std::find(patched.begin(), patched.end(), call_info.talkgroup) == patched.end()) {
       patched.insert(patched.begin(), call_info.talkgroup);
+    }
+    uint32_t final_seq = 0;
+    uint64_t sample_count = 0;
+    {
+      std::lock_guard<std::mutex> lock(state_mutex);
+      for (const auto &item : capture_states) {
+        if (std::get<0>(item.first) != call_info.call_num ||
+            (source > 0 && std::get<1>(item.first) != source)) {
+          continue;
+        }
+        if (item.second.seq > 0) {
+          final_seq = std::max(final_seq, item.second.seq - 1);
+        }
+        sample_count = std::max(sample_count, item.second.samples);
+      }
     }
     const int64_t timestamp = call_info.stop_time_ms > 0 ? call_info.stop_time_ms : now_ms();
     for (stream_t &stream : streams) {
@@ -466,9 +474,12 @@ public:
       }
       json object;
       add_common(object, stream, call_info, source, timestamp);
-      object["event"] = "call_end";
+      object["event"] = "capture_end";
       object["patched_talkgroups"] = patched;
       object["encrypted"] = call_info.encrypted;
+      object["synthesized"] = false;
+      object["final_seq"] = final_seq;
+      object["sample_count"] = sample_count;
       if (call_info.encryption_info_valid) {
         Encryption_Info info;
         info.encrypted = true;
@@ -489,6 +500,14 @@ public:
         ++it;
       }
     }
+    return 0;
+  }
+
+  // call_end is the artifact-processing completion hook and may arrive many
+  // seconds later or not at all on filtered calls. capture_end above owns the
+  // streaming lifecycle, so emitting here would create a delayed duplicate.
+  int call_end(Call_Data_t call_info) override {
+    (void)call_info;
     return 0;
   }
 

@@ -71,6 +71,9 @@ class Simple_Stream : public Plugin_Api {
     return source;
   }
 
+  // Every hook that touches per-source state derives the source with
+  // current_source(call), so codec frames, encryption observations, and audio
+  // packets of the same transmission share one capture_state.
   static capture_key key_for(Call *call, long source) {
     return std::make_tuple(call->get_call_num(), source,
                            call->get_phase2_tdma(),
@@ -385,7 +388,7 @@ public:
     bool changed = false;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
-      capture_state &state = capture_states[key_for(call, source)];
+      capture_state &state = capture_states[key_for(call, current_source(call))];
       changed = !state.encryption_valid || state.encryption.algid != info.algid ||
                 state.encryption.keyid != info.keyid || state.encryption.mi != info.mi;
       state.encryption_valid = true;
@@ -417,7 +420,11 @@ public:
     if (codec_type != CODEC_P25_IMBE && codec_type != CODEC_P25_AMBE) {
       return 0;
     }
-    const long source = src_id > 0 ? static_cast<long>(src_id) : current_source(call);
+    (void)src_id;
+    // Same source derivation as audio_stream. Keying by the decoder's unit id
+    // stranded fingerprints whenever it differed from the control-channel
+    // source that audio packets are attributed to.
+    const long source = current_source(call);
     uint64_t frame_hash = UINT64_C(1469598103934665603);
     frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(codec_type));
     frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(tgid));

@@ -49,8 +49,14 @@ WORKDIR /src
 
 COPY . .
 
-RUN git -C /src/user_plugins \
-       clone --depth 1 https://github.com/TrunkRecorder/tr-plugin-mqtt.git
+# Pinned for reproducible builds. tr-plugin-mqtt main as of 2026-10 fails to
+# configure here ("PahoMqttC::PahoMqttC ... target with the same name already
+# exists").
+ARG TR_PLUGIN_MQTT_REF=2d5b730f368a126170be5c19798fa8eeba0d6b9d
+RUN git init -q /src/user_plugins/tr-plugin-mqtt && \
+    git -C /src/user_plugins/tr-plugin-mqtt fetch -q --depth 1 \
+      https://github.com/TrunkRecorder/tr-plugin-mqtt.git "$TR_PLUGIN_MQTT_REF" && \
+    git -C /src/user_plugins/tr-plugin-mqtt checkout -q FETCH_HEAD
 
 WORKDIR /src/build
 

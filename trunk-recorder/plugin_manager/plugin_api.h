@@ -30,6 +30,28 @@ enum VoiceCodecType {
 
 using json = nlohmann::json;
 
+// One decoded voice codec frame, delivered from the decoder thread.
+struct Voice_Codec_Frame {
+  int codec_type = 0;
+  // Legacy decoder-provided values, passed unchanged to voice_codec_data.
+  // For P25 Phase 1, tgid is the last HDU ESS group and is not reset between
+  // assignments; for Phase 2 it is a volatile value that is usually -1.
+  long tgid = 0;
+  uint32_t src_id = 0;
+  const uint32_t *params = NULL;
+  int param_count = 0;
+  int errs = 0; // FEC bit errors corrected in this codec frame
+  // P25 decoder identity cache for the current recorder assignment, from
+  // Phase 1 link control (Group Voice Channel User; HDU also sets the group)
+  // or Phase 2 MAC (MAC_PTT, Group Voice Channel User). -1 when unknown.
+  // Same numbering as Call::get_talkgroup() and unit ids for P25 systems.
+  long ota_talkgroup = -1;
+  long ota_source = -1;
+  // Wall-clock ms since the epoch when link control/MAC last set the cache,
+  // or 0 when unknown (a Phase 1 HDU sets the group without a timestamp).
+  uint64_t ota_id_time_ms = 0;
+};
+
 class Plugin_Api {
 public:
   virtual int init(Config *config, std::vector<Source *> sources, std::vector<System *> systems) { frequency_format = config->frequency_format; return 0; };
@@ -67,6 +89,11 @@ public:
   // rx_sync slot tracking; for D-STAR/YSF they are 0. Use call->get_talkgroup() and
   // call->get_current_source_id() for authoritative values across all codec types.
   virtual int voice_codec_data(Call *call, int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs) { return 0; };
+  // Full per-frame view including the decoder identity cache. The default
+  // forwards to voice_codec_data, so plugins override one or the other.
+  virtual int voice_codec_frame(Call *call, const Voice_Codec_Frame &frame) {
+    return voice_codec_data(call, frame.codec_type, frame.tgid, frame.src_id, frame.params, frame.param_count, frame.errs);
+  };
   virtual int encryption_info(Call *call, const Encryption_Info &info) { return 0; };
   //void set_frequency_format(int f) { frequencyFormat = f; }
   virtual ~Plugin_Api(){};

@@ -761,9 +761,17 @@ void p25p2_tdma::handle_voice_frame(const uint8_t dibits[], int slot, int voice_
 
 	if (voice_codec_cb_) {
 		uint32_t params[4] = {(uint32_t)u[0], (uint32_t)u[1], (uint32_t)u[2], (uint32_t)u[3]};
+		// tgid is the volatile grp_id (cleared each time the frame
+		// assembler polls it for stream tags) and feeds existing
+		// fingerprints, so it is left unchanged. The ota_* arguments carry
+		// the per-assignment identity cache set by MAC_PTT and Group Voice
+		// Channel User MAC messages: -1 when unknown, and the wall-clock ms
+		// when last set (0 when unknown).
 		voice_codec_cb_(1 /*CODEC_P25_AMBE*/, grp_id,
 		                (cached_src_id > 0) ? (uint32_t)cached_src_id : 0,
-		                params, 4, (int)errs, voice_codec_cb_data_);
+		                params, 4, (int)errs,
+		                cached_grp_id, cached_src_id, cached_id_timestamp,
+		                voice_codec_cb_data_);
 	}
 
 	// Only dequantize and synthesize if we have valid audio (decrypted or unencrypted)

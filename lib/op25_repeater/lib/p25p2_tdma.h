@@ -143,7 +143,7 @@ private:
 
 	void send_msg(const std::string msg_str, long msg_type);
 
-	typedef void (*voice_codec_cb_t)(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, void *user_data);
+	typedef void (*voice_codec_cb_t)(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, long ota_grp_id, long ota_src_id, uint64_t ota_id_time_ms, void *user_data);
 	voice_codec_cb_t voice_codec_cb_;
 	void *voice_codec_cb_data_;
 

@@ -904,9 +904,18 @@ namespace gr {
 					sprintf(s, "%03x %03x %03x %03x %03x %03x %03x %03x\n", u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7]);
 
                     if (voice_codec_cb_) {
+                        // tgid is the HDU ESS group (never reset between
+                        // assignments) and feeds existing fingerprints, so it
+                        // is left unchanged. The ota_* arguments carry the
+                        // per-assignment identity cache: group/source from
+                        // LDU1/TDULC Group Voice Channel User (group also from
+                        // HDU), -1 when unknown, and the wall-clock ms when
+                        // link control last set them (0 when unknown).
                         voice_codec_cb_(0 /*CODEC_P25_IMBE*/, (long)vf_tgid,
                                         (cached_src_id > 0) ? (uint32_t)cached_src_id : 0,
-                                        u, 8, (int)errs, voice_codec_cb_data_);
+                                        u, 8, (int)errs,
+                                        cached_grp_id, cached_src_id, cached_id_timestamp,
+                                        voice_codec_cb_data_);
                     }
 
                     if (d_do_audio_output) {

@@ -134,14 +134,25 @@ void dmr_recorder_impl::plugin_callback_handler(int slot, int16_t *samples, int 
 
 void dmr_recorder_impl::voice_codec_cb_handler(int codec_type, long tgid, uint32_t src_id,
                                                const uint32_t *params, int param_count,
-                                               int errs, void *user_data) {
+                                               int errs, long ota_grp_id, long ota_src_id,
+                                               uint64_t ota_id_time_ms, void *user_data) {
   // The framer doesn't tell us which slot the codec data came from, so we route
   // to whichever slot currently has the matching talkgroup. If both slots are
   // active on the same TG (unusual) we attribute to slot 0.
   dmr_recorder_impl *self = static_cast<dmr_recorder_impl *>(user_data);
   for (int i = 0; i < 2; i++) {
     if (self->slots[i].call && self->slots[i].call->get_talkgroup() == tgid) {
-      plugman_voice_codec_data(self->slots[i].call, codec_type, tgid, src_id, params, param_count, errs);
+      Voice_Codec_Frame frame;
+      frame.codec_type = codec_type;
+      frame.tgid = tgid;
+      frame.src_id = src_id;
+      frame.params = params;
+      frame.param_count = param_count;
+      frame.errs = errs;
+      frame.ota_talkgroup = ota_grp_id;
+      frame.ota_source = ota_src_id;
+      frame.ota_id_time_ms = ota_id_time_ms;
+      plugman_voice_codec_frame(self->slots[i].call, frame);
       return;
     }
   }

@@ -59,7 +59,7 @@ namespace gr {
                 virtual void sync_reset(void) {}
                 virtual void crypt_reset(void) {}
                 virtual void crypt_key(uint16_t keyid, uint8_t algid, const std::vector<uint8_t> &key) {}
-                typedef void (*voice_codec_cb_t)(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, void *user_data);
+                typedef void (*voice_codec_cb_t)(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, long ota_grp_id, long ota_src_id, uint64_t ota_id_time_ms, void *user_data);
                 virtual void set_voice_codec_callback(voice_codec_cb_t cb, void *user_data) {}
         };
 

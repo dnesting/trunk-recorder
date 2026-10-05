@@ -110,7 +110,7 @@ public:
   // Plugin audio callback. Slot is bound at construction time so the framer
   // demuxes voice to the right Call.
   void plugin_callback_handler(int slot, int16_t *samples, int sampleCount);
-  static void voice_codec_cb_handler(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, void *user_data);
+  static void voice_codec_cb_handler(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, long ota_grp_id, long ota_src_id, uint64_t ota_id_time_ms, void *user_data);
 
 protected:
   void initialize(Source *src);

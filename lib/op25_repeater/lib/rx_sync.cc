@@ -401,7 +401,7 @@ void rx_sync::codeword(const uint8_t* cw, const enum codeword_types codeword_typ
 			uint32_t params[4] = {(uint32_t)U[0], (uint32_t)U[1], (uint32_t)U[2], (uint32_t)U[3]};
 			voice_codec_cb_(2 /*CODEC_DMR_AMBE*/, 0,
 			                (src_id[slot_id] > 0) ? (uint32_t)src_id[slot_id] : 0,
-			                params, 4, (int)errs, voice_codec_cb_data_);
+			                params, 4, (int)errs, -1, -1, 0, voice_codec_cb_data_);
 		}
 		break;
 	case CODEWORD_DSTAR:
@@ -413,7 +413,7 @@ void rx_sync::codeword(const uint8_t* cw, const enum codeword_types codeword_typ
 		if (voice_codec_cb_) {
 			uint32_t params[9];
 			for (int i = 0; i < 9; i++) params[i] = (uint32_t)b[i];
-			voice_codec_cb_(3 /*CODEC_DSTAR_AMBE*/, 0, 0, params, 9, 0, voice_codec_cb_data_);
+			voice_codec_cb_(3 /*CODEC_DSTAR_AMBE*/, 0, 0, params, 9, 0, -1, -1, 0, voice_codec_cb_data_);
 		}
 		break;
 	case CODEWORD_YSF_HALFRATE:	// 104 bits
@@ -434,7 +434,7 @@ void rx_sync::codeword(const uint8_t* cw, const enum codeword_types codeword_typ
 		if (voice_codec_cb_) {
 			uint32_t params[9];
 			for (int i = 0; i < 9; i++) params[i] = (uint32_t)b[i];
-			voice_codec_cb_(5 /*CODEC_YSF_HALFRATE*/, 0, 0, params, 9, 0, voice_codec_cb_data_);
+			voice_codec_cb_(5 /*CODEC_YSF_HALFRATE*/, 0, 0, params, 9, 0, -1, -1, 0, voice_codec_cb_data_);
 		}
 		break;
 	case CODEWORD_P25P2:
@@ -446,7 +446,7 @@ void rx_sync::codeword(const uint8_t* cw, const enum codeword_types codeword_typ
 			fullrate_cw[i] = cw[ysf_permutation[i]];
 		imbe_header_decode(fullrate_cw, u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], E0, ET);
 		if (voice_codec_cb_) {
-			voice_codec_cb_(4 /*CODEC_YSF_FULLRATE*/, 0, 0, u, 8, 0, voice_codec_cb_data_);
+			voice_codec_cb_(4 /*CODEC_YSF_FULLRATE*/, 0, 0, u, 8, 0, -1, -1, 0, voice_codec_cb_data_);
 		}
 		do_fullrate = true;
 		break;

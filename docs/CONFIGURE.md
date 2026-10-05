@@ -748,6 +748,35 @@ they received to detect loss of the final datagram. The plugin does not emit
 the legacy post-processing `call_end`, which may occur much later or be skipped
 on filtered calls.
 
+On P25 captures, `audio` events also report what the traffic-channel decoder
+itself decoded, independent of the control-channel `talkgroup` and `src`. They
+are present once the decoder has delivered at least one voice codec frame for
+the capture (never on analog, DMR, or SmartNet):
+
+| Field | Meaning |
+|-------|---------|
+| `ota_talkgroup` | Group address the decoder held for this recorder assignment when it decoded its most recent voice frame. Omitted when unknown. Same numbering as `talkgroup` (P25 talkgroups are not shifted). |
+| `ota_src` | Unit address the decoder held at the same moment. Omitted when unknown. Same numbering as `src`; for Phase 2 extended (roaming) addresses only the unit id is kept. |
+| `ota_age_ms` | Milliseconds between the decoder's last link-control/MAC identity message and this packet. Omitted when the decoder has no timestamp. |
+| `ota_frames` | Voice codec frames (20 ms each) decoded for this capture since the previous `audio` packet; `0` means the identity fields are carried over, not refreshed. |
+| `ota_errs` | Sum of the FEC bit errors corrected in those `ota_frames` frames; divide by `ota_frames` for a per-frame average. |
+
+Sources: Phase 1 takes both values from the LDU1/TDULC Group Voice Channel User
+link control (repeated about every 360 ms) and the group also from the HDU;
+Phase 2 takes them from MAC_PTT and Group Voice Channel User MAC messages.
+Identity messages are transmitted in the clear on encrypted calls, so the
+fields are normally present for encrypted audio too; a Phase 1 link control
+with the protected bit set is not decoded, leaving only the HDU group. The
+decoder clears its values at each recorder assignment. Phase 2 also clears them
+at MAC_END_PTT/MAC_HANGTIME, so the fields disappear between transmissions;
+Phase 1 keeps them until the next link control, so after a new key-up `ota_src`
+can still name the previous unit until `ota_age_ms` drops. Codec frames are
+decoded before their PCM reaches this plugin, so the identity may lead the
+packet's audio by the decoder pipeline latency (typically a few frames).
+`ota_talkgroup` can legitimately differ from `talkgroup` on patched or
+regrouped traffic; compare it with `patched_talkgroups` too. The plugin
+reports these values without filtering.
+
 ###### Plugin Object Example #1:
 This example will stream audio from talkgroup 58914 on system "CountyTrunked" to the local machine on UDP port 9123.
 ```yaml

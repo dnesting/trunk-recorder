@@ -34,6 +34,7 @@ struct stream_t {
 };
 
 using capture_key = std::tuple<long, long, bool, int>; // call, unit, phase2, slot
+using lane_key = std::tuple<long, bool, int>;           // call, phase2, slot
 
 struct capture_state {
   uint32_t seq = 0;
@@ -45,6 +46,18 @@ struct capture_state {
   Encryption_Info encryption;
 };
 
+// Decoder (over-the-air) identity for one recorder assignment, as reported
+// with each P25 voice codec frame. Kept per lane rather than per source so it
+// reflects the decoder regardless of which control-channel source the audio
+// packets are currently attributed to.
+struct ota_state {
+  long talkgroup = -1;      // -1: decoder has no group for this assignment
+  long source = -1;         // -1: decoder has no unit for this assignment
+  uint64_t id_time_ms = 0;  // 0: no link-control/MAC timestamp
+  uint32_t frames = 0;      // codec frames since the previous audio packet
+  uint64_t errs = 0;        // sum of per-frame FEC errors over those frames
+};
+
 class Simple_Stream : public Plugin_Api {
   boost::asio::io_context my_io_context;
   boost::asio::io_context my_tcp_io_context;
@@ -53,6 +66,7 @@ class Simple_Stream : public Plugin_Api {
   std::mutex state_mutex;
   std::mutex send_mutex;
   std::map<capture_key, capture_state> capture_states;
+  std::map<lane_key, ota_state> ota_states;
 
   static int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -78,6 +92,25 @@ class Simple_Stream : public Plugin_Api {
     return std::make_tuple(call->get_call_num(), source,
                            call->get_phase2_tdma(),
                            call->get_phase2_tdma() ? call->get_tdma_slot() : -1);
+  }
+
+  static lane_key lane_for(Call *call) {
+    return std::make_tuple(call->get_call_num(), call->get_phase2_tdma(),
+                           call->get_phase2_tdma() ? call->get_tdma_slot() : -1);
+  }
+
+  static void add_ota(json &object, const ota_state &ota, int64_t now) {
+    if (ota.talkgroup > 0) {
+      object["ota_talkgroup"] = ota.talkgroup;
+    }
+    if (ota.source > 0) {
+      object["ota_src"] = ota.source;
+    }
+    if (ota.id_time_ms > 0 && (ota.talkgroup > 0 || ota.source > 0)) {
+      object["ota_age_ms"] = std::max<int64_t>(0, now - static_cast<int64_t>(ota.id_time_ms));
+    }
+    object["ota_frames"] = ota.frames;
+    object["ota_errs"] = ota.errs;
   }
 
   static std::string capture_id(const std::string &receiver_id,
@@ -308,6 +341,8 @@ public:
     std::vector<std::string> fingerprints;
     bool encryption_valid;
     Encryption_Info encryption;
+    bool have_ota = false;
+    ota_state ota;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
       capture_state &state = capture_states[key_for(call, source)];
@@ -319,7 +354,15 @@ public:
       if (!all_zero && !encryption_valid) {
         state.samples += sampleCount;
       }
+      std::map<lane_key, ota_state>::iterator found = ota_states.find(lane_for(call));
+      if (found != ota_states.end()) {
+        have_ota = true;
+        ota = found->second;
+        found->second.frames = 0;
+        found->second.errs = 0;
+      }
     }
+    const int64_t now = now_ms();
 
     const int payload_samples = (!all_zero && !encryption_valid) ? sampleCount : 0;
     for (stream_t &stream : streams) {
@@ -332,7 +375,7 @@ public:
         continue;
       }
       json object;
-      add_common(object, stream, call, source, now_ms(),
+      add_common(object, stream, call, source, now,
                  payload_samples * static_cast<int>(sizeof(int16_t)));
       object["event"] = "audio";
       object["patched_talkgroups"] = patched;
@@ -343,6 +386,9 @@ public:
       object["voice_fingerprints"] = fingerprints;
       if (encryption_valid) {
         add_encryption(object, encryption);
+      }
+      if (have_ota) {
+        add_ota(object, ota, now);
       }
       send_packet(stream, object, payload_samples > 0 ? samples : NULL,
                   payload_samples);
@@ -414,25 +460,30 @@ public:
     return 0;
   }
 
-  int voice_codec_data(Call *call, int codec_type, long tgid, uint32_t src_id,
-                       const uint32_t *params, int param_count, int errs) override {
-    (void)errs;
-    if (codec_type != CODEC_P25_IMBE && codec_type != CODEC_P25_AMBE) {
+  int voice_codec_frame(Call *call, const Voice_Codec_Frame &frame) override {
+    if (frame.codec_type != CODEC_P25_IMBE && frame.codec_type != CODEC_P25_AMBE) {
       return 0;
     }
-    (void)src_id;
-    // Same source derivation as audio_stream. Keying by the decoder's unit id
-    // stranded fingerprints whenever it differed from the control-channel
-    // source that audio packets are attributed to.
+    // Same source derivation as audio_stream; the decoder's own unit id is
+    // reported separately as ota_src and never selects the state.
     const long source = current_source(call);
     uint64_t frame_hash = UINT64_C(1469598103934665603);
-    frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(codec_type));
-    frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(tgid));
-    for (int i = 0; i < param_count; ++i) {
-      frame_hash = fnv_mix(frame_hash, params[i]);
+    frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(frame.codec_type));
+    frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(frame.tgid));
+    for (int i = 0; i < frame.param_count; ++i) {
+      frame_hash = fnv_mix(frame_hash, frame.params[i]);
     }
 
     std::lock_guard<std::mutex> lock(state_mutex);
+    ota_state &ota = ota_states[lane_for(call)];
+    ota.talkgroup = frame.ota_talkgroup;
+    ota.source = frame.ota_source;
+    ota.id_time_ms = frame.ota_id_time_ms;
+    ++ota.frames;
+    if (frame.errs > 0) {
+      ota.errs += static_cast<uint64_t>(frame.errs);
+    }
+
     capture_state &state = capture_states[key_for(call, source)];
     if (state.have_frame_hash) {
       uint64_t window_hash = fnv_mix(fnv_mix(UINT64_C(1469598103934665603),
@@ -503,6 +554,14 @@ public:
          it != capture_states.end();) {
       if (std::get<0>(it->first) == call_info.call_num) {
         it = capture_states.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (std::map<lane_key, ota_state>::iterator it = ota_states.begin();
+         it != ota_states.end();) {
+      if (std::get<0>(it->first) == call_info.call_num) {
+        it = ota_states.erase(it);
       } else {
         ++it;
       }

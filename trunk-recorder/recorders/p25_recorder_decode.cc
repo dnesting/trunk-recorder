@@ -154,10 +154,24 @@ void p25_recorder_decode::plugin_callback_handler(int16_t *samples, int sampleCo
   }
 }
 
-void p25_recorder_decode::voice_codec_cb_handler(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, void *user_data) {
+void p25_recorder_decode::voice_codec_cb_handler(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, long ota_grp_id, long ota_src_id, uint64_t ota_id_time_ms, void *user_data) {
   p25_recorder_decode *self = static_cast<p25_recorder_decode *>(user_data);
-  if (self->d_call) {
-    plugman_voice_codec_data(self->d_call, codec_type, tgid, src_id, params, param_count, errs);
+  // Codec callbacks run under the frame assembler's assignment lock, which
+  // stop()/start() take (via clear()) after changing d_call, so a callback
+  // in progress always completes before the assignment changes.
+  Call *call = self->d_call;
+  if (call) {
+    Voice_Codec_Frame frame;
+    frame.codec_type = codec_type;
+    frame.tgid = tgid;
+    frame.src_id = src_id;
+    frame.params = params;
+    frame.param_count = param_count;
+    frame.errs = errs;
+    frame.ota_talkgroup = ota_grp_id;
+    frame.ota_source = ota_src_id;
+    frame.ota_id_time_ms = ota_id_time_ms;
+    plugman_voice_codec_frame(call, frame);
   }
 }
 

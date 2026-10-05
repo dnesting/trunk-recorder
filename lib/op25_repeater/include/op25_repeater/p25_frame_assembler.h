@@ -66,7 +66,7 @@ namespace gr {
       virtual void set_call_generation(uint64_t generation) {}
       virtual void clear() {};
       virtual  void clear_silence_frame_count() {};
-      typedef void (*voice_codec_cb_t)(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, void *user_data);
+      typedef void (*voice_codec_cb_t)(int codec_type, long tgid, uint32_t src_id, const uint32_t *params, int param_count, int errs, long ota_grp_id, long ota_src_id, uint64_t ota_id_time_ms, void *user_data);
       virtual void set_voice_codec_callback(voice_codec_cb_t cb, void *user_data) {};
     };
 

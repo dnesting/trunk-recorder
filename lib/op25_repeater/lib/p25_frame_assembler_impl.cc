@@ -144,6 +144,8 @@ static const int MAX_IN = 1;	// maximum number of input streams
       p2tdma.call_end();
       p1fdma.clear();
       p2tdma.clear();
+      p1fdma.reset_call_terminated();
+      p2tdma.reset_call_terminated();
       output_queue.clear();
       silence_frame_count = 0;
     }
@@ -207,8 +209,10 @@ p25_frame_assembler_impl::general_work (int noutput_items,
     for (int i = 0; i < ninput_items[0]; i++) {
       if(p2tdma.rx_sym(in[i])) {
         int rc = p2tdma.handle_frame();
-        terminate_call = p2tdma.get_call_terminated();
-        if (terminate_call.first) {
+        // Latch: a later frame in this batch must not erase a terminator.
+        std::pair<bool,long> frame_terminated = p2tdma.get_call_terminated();
+        if (frame_terminated.first) {
+          terminate_call = frame_terminated;
           p2tdma.reset_call_terminated();
         }
         

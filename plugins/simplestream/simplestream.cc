@@ -70,6 +70,16 @@ class Simple_Stream : public Plugin_Api {
   // Source of the lane's most recent PCM-bearing audio packet. A change marks
   // a new run of that source, which is where ingest starts a transmission.
   std::map<lane_key, long> last_pcm_sources;
+  // Encryption observations without a usable unit (e.g. the Phase 1 HDU, which
+  // precedes the key-up's link control). They are processed asynchronously
+  // and can arrive before the new key-up's first codec frame, while the lane
+  // still names the previous talker, so they wait here and are attributed by
+  // the next codec frame's identity.
+  std::map<lane_key, Encryption_Info> pending_encryption;
+  // Attributed pending observations not yet sent as enc_info. The codec
+  // callback runs on the decoder thread, which must not block on the network,
+  // so the next audio, encryption, or capture_end hook sends them.
+  std::map<lane_key, std::vector<std::pair<long, Encryption_Info>>> resolved_encryption;
 
   static int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -350,6 +360,45 @@ public:
     return 0;
   }
 
+  // Records an encryption observation for one source; true when it differs
+  // from what that source already had. Caller holds state_mutex.
+  bool apply_encryption_locked(Call *call, long source, const Encryption_Info &info) {
+    capture_state &state = capture_states[key_for(call, source)];
+    const bool changed = !state.encryption_valid || state.encryption.algid != info.algid ||
+                         state.encryption.keyid != info.keyid || state.encryption.mi != info.mi;
+    state.encryption_valid = true;
+    state.encryption = info;
+    return changed;
+  }
+
+  std::vector<std::pair<long, Encryption_Info>> take_resolved_encryption_locked(Call *call) {
+    std::vector<std::pair<long, Encryption_Info>> out;
+    std::map<lane_key, std::vector<std::pair<long, Encryption_Info>>>::iterator found =
+        resolved_encryption.find(lane_for(call));
+    if (found != resolved_encryption.end()) {
+      out.swap(found->second);
+      resolved_encryption.erase(found);
+    }
+    return out;
+  }
+
+  void send_enc_info(Call *call, const std::vector<long> &patched, long source,
+                     const Encryption_Info &info) {
+    for (stream_t &stream : streams) {
+      if (!stream.sendJSON ||
+          !(stream.short_name.empty() || stream.short_name == call->get_short_name()) ||
+          !stream_matches(stream, call->get_talkgroup(), patched)) {
+        continue;
+      }
+      json object;
+      add_common(object, stream, call, source, now_ms(), 0);
+      object["event"] = "enc_info";
+      object["patched_talkgroups"] = patched;
+      add_encryption(object, info);
+      send_packet(stream, object);
+    }
+  }
+
   int audio_stream(Call *call, Recorder *recorder, int16_t *samples,
                    int sampleCount) override {
     const std::vector<long> patched = patched_talkgroups(call);
@@ -366,8 +415,10 @@ public:
     bool have_ota = false;
     ota_state ota;
     long source;
+    std::vector<std::pair<long, Encryption_Info>> resolved;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
+      resolved = take_resolved_encryption_locked(call);
       source = stream_source_locked(call);
       capture_state &state = capture_states[key_for(call, source)];
       seq = state.seq++;
@@ -394,6 +445,9 @@ public:
         found->second.frames = 0;
         found->second.errs = 0;
       }
+    }
+    for (const std::pair<long, Encryption_Info> &item : resolved) {
+      send_enc_info(call, patched, item.first, item.second);
     }
     const int64_t now = now_ms();
 
@@ -461,36 +515,28 @@ public:
     return 0;
   }
 
+  // An observation that names a valid unit (the decoder's talker when it sent
+  // the ESS) belongs to that unit's audio. One without a unit is held for the
+  // next codec frame: the lane's current identity may still be the previous
+  // key-up's talker.
   int encryption_info(Call *call, const Encryption_Info &info) override {
     const std::vector<long> patched = patched_talkgroups(call);
     bool changed = false;
-    long source;
+    std::vector<std::pair<long, Encryption_Info>> resolved;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
-      const long stream_source = stream_source_locked(call);
-      source = info.source > 0 ? info.source : stream_source;
-      capture_state &state = capture_states[key_for(call, stream_source)];
-      changed = !state.encryption_valid || state.encryption.algid != info.algid ||
-                state.encryption.keyid != info.keyid || state.encryption.mi != info.mi;
-      state.encryption_valid = true;
-      state.encryption = info;
-    }
-    if (!changed) {
-      return 0;
-    }
-
-    for (stream_t &stream : streams) {
-      if (!stream.sendJSON ||
-          !(stream.short_name.empty() || stream.short_name == call->get_short_name()) ||
-          !stream_matches(stream, call->get_talkgroup(), patched)) {
-        continue;
+      resolved = take_resolved_encryption_locked(call);
+      if (valid_unit(info.source)) {
+        changed = apply_encryption_locked(call, info.source, info);
+      } else {
+        pending_encryption[lane_for(call)] = info;
       }
-      json object;
-      add_common(object, stream, call, source, now_ms(), 0);
-      object["event"] = "enc_info";
-      object["patched_talkgroups"] = patched;
-      add_encryption(object, info);
-      send_packet(stream, object);
+    }
+    for (const std::pair<long, Encryption_Info> &item : resolved) {
+      send_enc_info(call, patched, item.first, item.second);
+    }
+    if (changed) {
+      send_enc_info(call, patched, info.source, info);
     }
     return 0;
   }
@@ -518,7 +564,15 @@ public:
 
     // Same source derivation as audio_stream, after this frame's identity is
     // applied, so the frame's fingerprint belongs to its own talker.
-    capture_state &state = capture_states[key_for(call, stream_source_locked(call))];
+    const long source = stream_source_locked(call);
+    std::map<lane_key, Encryption_Info>::iterator pending = pending_encryption.find(lane_for(call));
+    if (pending != pending_encryption.end()) {
+      if (apply_encryption_locked(call, source, pending->second)) {
+        resolved_encryption[lane_for(call)].push_back(std::make_pair(source, pending->second));
+      }
+      pending_encryption.erase(pending);
+    }
+    capture_state &state = capture_states[key_for(call, source)];
     if (state.have_frame_hash) {
       uint64_t window_hash = fnv_mix(fnv_mix(UINT64_C(1469598103934665603),
                                              state.last_frame_hash),
@@ -544,8 +598,10 @@ public:
     }
     uint32_t final_seq = 0;
     uint64_t sample_count = 0;
+    std::vector<std::pair<long, Encryption_Info>> resolved;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
+      resolved = take_resolved_encryption_locked(call);
       // The counters describe the capture's final transmission, i.e. the
       // latest PCM run, which is the one ingest still has in flight: that
       // source's last seq and the samples of its final run.
@@ -571,6 +627,12 @@ public:
           }
           sample_count = std::max(sample_count, item.second.samples);
         }
+      }
+    }
+    if (!resolved.empty()) {
+      const std::vector<long> current_patched = patched_talkgroups(call);
+      for (const std::pair<long, Encryption_Info> &item : resolved) {
+        send_enc_info(call, current_patched, item.first, item.second);
       }
     }
     const int64_t timestamp = call_info.stop_time_ms > 0 ? call_info.stop_time_ms : now_ms();
@@ -620,6 +682,22 @@ public:
          it != last_pcm_sources.end();) {
       if (std::get<0>(it->first) == call_info.call_num) {
         it = last_pcm_sources.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (std::map<lane_key, Encryption_Info>::iterator it = pending_encryption.begin();
+         it != pending_encryption.end();) {
+      if (std::get<0>(it->first) == call_info.call_num) {
+        it = pending_encryption.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (std::map<lane_key, std::vector<std::pair<long, Encryption_Info>>>::iterator it = resolved_encryption.begin();
+         it != resolved_encryption.end();) {
+      if (std::get<0>(it->first) == call_info.call_num) {
+        it = resolved_encryption.erase(it);
       } else {
         ++it;
       }

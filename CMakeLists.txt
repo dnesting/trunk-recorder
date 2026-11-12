@@ -311,6 +311,7 @@ list(APPEND trunk_recorder_sources
   trunk-recorder/gr_blocks/decoders/tps_decoder_sink_impl.cc
   trunk-recorder/gr_blocks/decoder_wrapper_impl.cc
   trunk-recorder/gr_blocks/plugin_wrapper_impl.cc
+  trunk-recorder/gr_blocks/talkgroup_gate.cc
   trunk-recorder/gr_blocks/selector_impl.cc
   trunk-recorder/gr_blocks/pwr_squelch_cc_impl.cc
   trunk-recorder/gr_blocks/squelch_base_cc_impl.cc
@@ -425,3 +426,10 @@ if (GR_IIO_FOUND)
 endif()
 
 install(TARGETS trunk-recorder RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+option(TALKGROUP_GATE_TESTS "Build the talkgroup gate offline test" OFF)
+if(TALKGROUP_GATE_TESTS)
+  add_executable(talkgroup_gate_test
+    trunk-recorder/gr_blocks/talkgroup_gate_test.cc
+    trunk-recorder/gr_blocks/talkgroup_gate.cc)
+endif()

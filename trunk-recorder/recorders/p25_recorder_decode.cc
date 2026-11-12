@@ -47,6 +47,16 @@ void p25_recorder_decode::start(Call *call) {
   op25_frame_assembler->set_call_generation(d_call_generation);
   levels->set_k(call->get_system()->get_digital_levels());
 
+  if (plugin_sink) {
+    if (call->is_conventional()) {
+      plugin_sink->disable_talkgroup_gate();
+    } else if (call->get_system_type() == "smartnet") {
+      plugin_sink->set_talkgroup_gate(call->get_talkgroup() >> 4);
+    } else {
+      plugin_sink->set_talkgroup_gate(call->get_talkgroup());
+    }
+  }
+
   {
     std::lock_guard<std::mutex> lock(plugin_callback_mutex);
     d_call = call;

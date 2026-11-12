@@ -1,13 +1,19 @@
 // Offline check of the simplestream JSON wire for source attribution.
 // Drives the plugin hooks directly with a real Call_impl/System_impl and reads
-// the emitted packets from a loopback UDP socket. Build with
-// -DSIMPLESTREAM_TESTS=ON and run build/plugins/simplestream/simplestream_test;
-// it exits non-zero on the first failed expectation.
+// the emitted packets from a loopback UDP socket. Decoder behaviour (identity
+// per codec frame, its reset at key-up boundaries) is simulated by the codec
+// frames the test feeds in; the OP25 decoder itself is not exercised. Build
+// with -DSIMPLESTREAM_TESTS=ON and run
+// build/plugins/simplestream/simplestream_test; it exits non-zero if any
+// expectation fails or an expected packet does not arrive within 2s.
 
 #include "simplestream.cc"
 
 #include "../../trunk-recorder/call_impl.h"
 #include "../../trunk-recorder/systems/system.h"
+
+#include <sys/socket.h>
+#include <sys/time.h>
 
 #include <cstdlib>
 #include <iostream>
@@ -31,7 +37,10 @@ void expect(bool ok, const std::string &what) {
 
 class Wire {
 public:
-  Wire() : socket_(io_, ip::udp::endpoint(ip::address_v4::loopback(), 0)) {}
+  Wire() : socket_(io_, ip::udp::endpoint(ip::address_v4::loopback(), 0)) {
+    struct timeval timeout = {2, 0};
+    setsockopt(socket_.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  }
 
   unsigned short port() const { return socket_.local_endpoint().port(); }
 
@@ -76,7 +85,7 @@ json audio(Simple_Stream &plugin, Wire &wire, Call *call, Recorder *rec, int sam
 
 } // namespace
 
-int main() {
+int run() {
   const long A = 1116734; // control-channel source for the whole capture
   const long B = 1113737; // a second unit that keys up in the same capture
 
@@ -119,8 +128,9 @@ int main() {
   expect(p["src"] == A && p["payload_length"] == 0 && p["seq"] == 2 && p["ota_frames"] == 0,
          "hang-time silence carries the last identity without PCM");
 
-  // Key-up 2 by B while the control channel still says A. The decoder cleared
-  // its identity at the terminator, so frames before B's link control fall back.
+  // Key-up 2 by B while the control channel still says A. Frames before B's
+  // link control carry no identity (simulating the decoder's reset at the
+  // terminator), so they fall back.
   codec(plugin, &call, -1);
   p = audio(plugin, wire, &call, &rec, 160);
   expect(p["src"] == A && !p.contains("ota_src") && p["seq"] == 3 && p["start_sample"] == 320,
@@ -145,6 +155,10 @@ int main() {
   p = audio(plugin, wire, &call, &rec, 160);
   expect(p["src"] == A && p["seq"] == 5 && p["start_sample"] == 640, "A continues after B");
 
+  // Trailing hang-time silence after the final source belongs to its counters.
+  p = audio(plugin, wire, &call, &rec, 160, true);
+  expect(p["src"] == A && p["payload_length"] == 0 && p["seq"] == 6, "trailing silence keeps the final source");
+
   Call_Data_t info{};
   info.call_num = call.get_call_num();
   info.talkgroup = call.get_talkgroup();
@@ -157,8 +171,58 @@ int main() {
   plugin.capture_end(&call, info);
   p = wire.next();
   expect(p["event"] == "capture_end" && p["src"] == A, "capture_end names the final run's source");
-  expect(p["final_seq"] == 5, "final_seq is the final source's last seq");
+  expect(p["final_seq"] == 6, "final_seq includes trailing empty packets");
   expect(p["sample_count"] == 320, "sample_count covers the final run only");
+
+  // Encryption observed at an HDU (no unit) while the lane still names the
+  // previous talker: it is held for the next key-up's codec frame instead of
+  // marking A, and A's later clear audio keeps its PCM.
+  Test_Call call2(730, 852000000, sys, cfg);
+  call2.add_source(A);
+  plugin.call_start(&call2);
+  wire.next();
+  codec(plugin, &call2, A);
+  p = audio(plugin, wire, &call2, &rec, 160);
+  expect(p["src"] == A && p["payload_length"] == 320, "clear audio from A");
+
+  Encryption_Info hdu;
+  hdu.encrypted = true;
+  hdu.algid = 0x84;
+  hdu.keyid = 0x1234;
+  hdu.source = -1;
+  plugin.encryption_info(&call2, hdu);
+  p = audio(plugin, wire, &call2, &rec, 160); // A's tail, decoded before B's first frame
+  expect(p["event"] == "audio" && p["src"] == A && p["payload_length"] == 320 && !p.contains("encrypted"),
+         "source-less encryption is not attributed to the previous talker");
+
+  codec(plugin, &call2, B);
+  p = audio(plugin, wire, &call2, &rec, 160, true);
+  expect(p["event"] == "enc_info" && p["src"] == B && p["algid"] == 0x84, "held encryption goes to the next key-up's talker");
+  p = wire.next();
+  expect(p["event"] == "audio" && p["src"] == B && p["encrypted"] == true && p["payload_length"] == 0,
+         "B's audio carries the encryption");
+
+  codec(plugin, &call2, -1);
+  codec(plugin, &call2, A);
+  p = audio(plugin, wire, &call2, &rec, 160);
+  expect(p["src"] == A && p["payload_length"] == 320 && !p.contains("encrypted"), "A's next clear key-up keeps its PCM");
+
+  Encryption_Info ldu2 = hdu;
+  ldu2.source = B;
+  plugin.encryption_info(&call2, ldu2);
+  p = audio(plugin, wire, &call2, &rec, 160);
+  expect(p["event"] == "audio", "a repeated observation for the same unit is not re-sent");
+
+  Call_Data_t info2{};
+  info2.call_num = call2.get_call_num();
+  info2.talkgroup = call2.get_talkgroup();
+  info2.freq = call2.get_freq();
+  info2.short_name = "t";
+  info2.capture_start_time_ms = call2.get_capture_start_time_ms();
+  info2.tdma_slot = -1;
+  plugin.capture_end(&call2, info2);
+  p = wire.next();
+  expect(p["event"] == "capture_end", "second capture ends");
 
   plugin.stop();
   if (failures > 0) {
@@ -167,4 +231,13 @@ int main() {
   }
   std::cout << "all passed" << std::endl;
   return EXIT_SUCCESS;
+}
+
+int main() {
+  try {
+    return run();
+  } catch (const std::exception &e) {
+    std::cout << "FAIL " << e.what() << std::endl;
+    return EXIT_FAILURE;
+  }
 }

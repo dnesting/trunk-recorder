@@ -740,8 +740,18 @@ current transmission. On `audio` (and `enc_info`) events of P25 captures,
 (Phase 1 link control, Phase 2 MAC_PTT / Group Voice Channel User) whenever it
 has a valid one (1 through 0xFFFFFB); otherwise, and on non-P25 captures, it is
 the control-channel source, which can lag the talker or revert on a repeated
-grant. A change of `src` on audio therefore marks a new talker. `call_start`
-always carries the control-channel source. `seq` and `start_sample` count per
+grant. A change of `src` on audio therefore marks a new talker; because the
+decoder runs ahead of the audio callback, at a talker change the new identity
+can lead the PCM by up to about one decoder output batch, so the last packet
+of one talker's audio can carry the next talker's `src`. `call_start`
+always carries the control-channel source. An encryption observation that
+names a valid unit is recorded for that unit; one that names none (the Phase 1
+header, which precedes the key-up's link control) is attributed by the next
+decoded voice frame, i.e. to the new key-up's `src`, never to the previous
+talker. Encryption is remembered per `src` for the rest of the capture, and
+PCM for a `src` with confirmed encryption is not streamed, so a unit that keys
+up encrypted and later in the clear within one capture loses that clear
+audio. `seq` and `start_sample` count per
 `src` within a capture: a unit that talks again after another unit continues
 its own counters. A positive traffic-channel encryption observation
 emits `enc_info` with `algid`, `keyid`, and the 72-bit hexadecimal `mi`; those
@@ -785,7 +795,11 @@ with the protected bit set is not decoded, leaving only the HDU group. The
 decoder clears its values at each recorder assignment and at the end of each
 key-up (Phase 1 TDU/TDULC, Phase 2 MAC_END_PTT/MAC_HANGTIME), and Phase 1
 clears the unit at each HDU, so the fields disappear between transmissions and
-a new key-up never inherits the previous unit. Codec frames are
+a new key-up never inherits the previous unit. The decoder also reports a
+terminator that shares a processing batch with later frames (both phases), so
+WAV transmission boundaries follow key-ups to within about one batch: the
+start of the next key-up can land in the previous transmission's file.
+Codec frames are
 decoded before their PCM reaches this plugin, so the identity may lead the
 packet's audio by the decoder pipeline latency (typically a few frames).
 `ota_talkgroup` can legitimately differ from `talkgroup` on patched or

@@ -24,7 +24,7 @@
 #include <gnuradio/blocks/multiply_const.h>
 #endif
 
-#include "../gr_blocks/plugin_wrapper.h"
+#include "../gr_blocks/plugin_wrapper_impl.h"
 #include "../gr_blocks/transmission_sink.h"
 #include "recorder.h"
 
@@ -53,7 +53,7 @@ protected:
   gr::blocks::short_to_float::sptr converter;
   gr::blocks::multiply_const_ss::sptr levels;
   gr::blocks::transmission_sink::sptr wav_sink;
-  gr::blocks::plugin_wrapper::sptr plugin_sink;
+  gr::blocks::plugin_wrapper_impl::sptr plugin_sink;
   // Serializes call assignment changes with PCM callbacks. Once stop()
   // returns, no audio_stream callback for the old capture can still be in
   // progress or begin later.

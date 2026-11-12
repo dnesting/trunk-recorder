@@ -24,6 +24,7 @@
 #define INCLUDED_GR_PLUGIN_WRAPPER_IMPL_H
 
 #include "plugin_wrapper.h"
+#include "talkgroup_gate.h"
 #include <boost/log/trivial.hpp>
 
 namespace gr {
@@ -32,6 +33,7 @@ namespace blocks {
 class plugin_wrapper_impl : public plugin_wrapper {
 private:
   plugin_callback d_callback;
+  Talkgroup_Gate d_gate;
 
 protected:
   boost::mutex d_mutex;
@@ -47,6 +49,10 @@ public:
   static sptr make(plugin_callback callback);
 
   plugin_wrapper_impl(plugin_callback callback);
+
+  // Forward only audio tagged with this encoded talkgroup (see Talkgroup_Gate).
+  void set_talkgroup_gate(long talkgroup);
+  void disable_talkgroup_gate();
 
   virtual int work(int noutput_items,
                    gr_vector_const_void_star &input_items,

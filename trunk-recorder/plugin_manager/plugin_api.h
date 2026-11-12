@@ -41,9 +41,11 @@ struct Voice_Codec_Frame {
   const uint32_t *params = NULL;
   int param_count = 0;
   int errs = 0; // FEC bit errors corrected in this codec frame
-  // P25 decoder identity cache for the current recorder assignment, from
-  // Phase 1 link control (Group Voice Channel User; HDU also sets the group)
-  // or Phase 2 MAC (MAC_PTT, Group Voice Channel User). -1 when unknown.
+  // P25 decoder identity cache for the current key-up, from Phase 1 link
+  // control (Group Voice Channel User; HDU also sets the group) or Phase 2
+  // MAC (MAC_PTT, Group Voice Channel User). Cleared at the end of each
+  // key-up (Phase 1 TDU/TDULC, and the source at HDU; Phase 2 MAC_END_PTT /
+  // MAC_HANGTIME) and on each new recorder assignment. -1 when unknown.
   // Same numbering as Call::get_talkgroup() and unit ids for P25 systems.
   long ota_talkgroup = -1;
   long ota_source = -1;

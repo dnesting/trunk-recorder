@@ -733,7 +733,15 @@ With JSON enabled, `call_start`, `audio`, `enc_info`, and `capture_end` carry
 and `voice_fingerprints`. `capture_id` identifies the recorder assignment and
 uses its immutable creation timestamp, so it is stable when playable audio
 starts or the decoded source unit changes; `src` identifies the unit for the
-current transmission. A positive traffic-channel encryption observation
+current transmission. On `audio` (and `enc_info`) events of P25 captures,
+`src` is the unit the traffic-channel decoder read for the current key-up
+(Phase 1 link control, Phase 2 MAC_PTT / Group Voice Channel User) whenever it
+has a valid one (1 through 0xFFFFFB); otherwise, and on non-P25 captures, it is
+the control-channel source, which can lag the talker or revert on a repeated
+grant. A change of `src` on audio therefore marks a new talker. `call_start`
+always carries the control-channel source. `seq` and `start_sample` count per
+`src` within a capture: a unit that talks again after another unit continues
+its own counters. A positive traffic-channel encryption observation
 emits `enc_info` with `algid`, `keyid`, and the 72-bit hexadecimal `mi`; those
 confirmed fields are repeated on subsequent events. The preliminary
 `encrypted` value on `call_start` remains a claim from the control channel or
@@ -743,34 +751,39 @@ talkgroup configuration.
 asynchronous call artifact processing, including on calls that artifact
 filters later discard. `final_seq` is the last audio packet sequence number
 and `sample_count` is the number of clear PCM samples offered to the stream for
-the final source transmission. Consumers can compare these counters with what
+the final source transmission: `src` is the source of the capture's last
+PCM-bearing `audio` packet, `final_seq` is that source's last `seq`, and
+`sample_count` covers that source's final uninterrupted run of PCM-bearing
+packets (from where the previous PCM-bearing packet carried another `src`). Consumers can compare these counters with what
 they received to detect loss of the final datagram. The plugin does not emit
 the legacy post-processing `call_end`, which may occur much later or be skipped
 on filtered calls.
 
 On P25 captures, `audio` events also report what the traffic-channel decoder
-itself decoded, independent of the control-channel `talkgroup` and `src`. They
+itself decoded, as diagnostics: `ota_src` is reported as decoded even when
+`src` falls back to the control channel because it is not a valid unit. They
 are present once the decoder has delivered at least one voice codec frame for
 the capture (never on analog, DMR, or SmartNet):
 
 | Field | Meaning |
 |-------|---------|
-| `ota_talkgroup` | Group address the decoder held for this recorder assignment when it decoded its most recent voice frame. Omitted when unknown. Same numbering as `talkgroup` (P25 talkgroups are not shifted). |
+| `ota_talkgroup` | Group address the decoder held for the current key-up when it decoded its most recent voice frame. Omitted when unknown. Same numbering as `talkgroup` (P25 talkgroups are not shifted). |
 | `ota_src` | Unit address the decoder held at the same moment. Omitted when unknown. Same numbering as `src`; for Phase 2 extended (roaming) addresses only the unit id is kept. |
 | `ota_age_ms` | Milliseconds between the decoder's last link-control/MAC identity message and this packet. Omitted when the decoder has no timestamp. |
 | `ota_frames` | Voice codec frames (20 ms each) decoded for this capture since the previous `audio` packet; `0` means the identity fields are carried over, not refreshed. |
 | `ota_errs` | Sum of the FEC bit errors corrected in those `ota_frames` frames; divide by `ota_frames` for a per-frame average. |
 
 Sources: Phase 1 takes both values from the LDU1/TDULC Group Voice Channel User
-link control (repeated about every 360 ms) and the group also from the HDU;
+link control (repeated about every 360 ms; the LDU1 link control is decoded
+before that LDU1's voice frames) and the group also from the HDU;
 Phase 2 takes them from MAC_PTT and Group Voice Channel User MAC messages.
 Identity messages are transmitted in the clear on encrypted calls, so the
 fields are normally present for encrypted audio too; a Phase 1 link control
 with the protected bit set is not decoded, leaving only the HDU group. The
-decoder clears its values at each recorder assignment. Phase 2 also clears them
-at MAC_END_PTT/MAC_HANGTIME, so the fields disappear between transmissions;
-Phase 1 keeps them until the next link control, so after a new key-up `ota_src`
-can still name the previous unit until `ota_age_ms` drops. Codec frames are
+decoder clears its values at each recorder assignment and at the end of each
+key-up (Phase 1 TDU/TDULC, Phase 2 MAC_END_PTT/MAC_HANGTIME), and Phase 1
+clears the unit at each HDU, so the fields disappear between transmissions and
+a new key-up never inherits the previous unit. Codec frames are
 decoded before their PCM reaches this plugin, so the identity may lead the
 packet's audio by the decoder pipeline latency (typically a few frames).
 `ota_talkgroup` can legitimately differ from `talkgroup` on patched or

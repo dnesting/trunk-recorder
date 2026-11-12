@@ -39,6 +39,7 @@ using lane_key = std::tuple<long, bool, int>;           // call, phase2, slot
 struct capture_state {
   uint32_t seq = 0;
   uint64_t samples = 0;
+  uint64_t run_start_samples = 0; // samples when this source's latest PCM run began
   bool have_frame_hash = false;
   uint64_t last_frame_hash = 0;
   std::deque<std::string> fingerprints;
@@ -46,13 +47,12 @@ struct capture_state {
   Encryption_Info encryption;
 };
 
-// Decoder (over-the-air) identity for one recorder assignment, as reported
-// with each P25 voice codec frame. Kept per lane rather than per source so it
-// reflects the decoder regardless of which control-channel source the audio
-// packets are currently attributed to.
+// Decoder (over-the-air) identity for the current key-up, as reported with
+// each P25 voice codec frame. Kept per lane rather than per source because it
+// is what selects the source of the lane's packets.
 struct ota_state {
-  long talkgroup = -1;      // -1: decoder has no group for this assignment
-  long source = -1;         // -1: decoder has no unit for this assignment
+  long talkgroup = -1;      // -1: decoder has no group for this key-up
+  long source = -1;         // -1: decoder has no unit for this key-up
   uint64_t id_time_ms = 0;  // 0: no link-control/MAC timestamp
   uint32_t frames = 0;      // codec frames since the previous audio packet
   uint64_t errs = 0;        // sum of per-frame FEC errors over those frames
@@ -67,6 +67,9 @@ class Simple_Stream : public Plugin_Api {
   std::mutex send_mutex;
   std::map<capture_key, capture_state> capture_states;
   std::map<lane_key, ota_state> ota_states;
+  // Source of the lane's most recent PCM-bearing audio packet. A change marks
+  // a new run of that source, which is where ingest starts a transmission.
+  std::map<lane_key, long> last_pcm_sources;
 
   static int64_t now_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -85,9 +88,29 @@ class Simple_Stream : public Plugin_Api {
     return source;
   }
 
-  // Every hook that touches per-source state derives the source with
-  // current_source(call), so codec frames, encryption observations, and audio
-  // packets of the same transmission share one capture_state.
+  // A P25 unit id the decoder read from this key-up's link control / MAC.
+  // 0 is no unit and 0xFFFFFC-0xFFFFFF are FNE/system ids, never a talker.
+  static bool valid_unit(long unit) {
+    return unit > 0 && unit < 0xFFFFFC;
+  }
+
+  // The source carried by audio packets: the unit talking in the current
+  // key-up as decoded from the voice channel, or the control-channel source
+  // when the decoder has no valid unit for this key-up (before its first link
+  // control, protected link control, uncorrectable link control, non-P25).
+  // The control-channel source lags the voice channel and can revert on a
+  // repeated grant, so it is only the fallback. Every hook that touches
+  // per-source state derives the source here, so codec frames, encryption
+  // observations, and audio packets of one transmission share a
+  // capture_state. Caller holds state_mutex.
+  long stream_source_locked(Call *call) {
+    std::map<lane_key, ota_state>::const_iterator found = ota_states.find(lane_for(call));
+    if (found != ota_states.end() && valid_unit(found->second.source)) {
+      return found->second.source;
+    }
+    return current_source(call);
+  }
+
   static capture_key key_for(Call *call, long source) {
     return std::make_tuple(call->get_call_num(), source,
                            call->get_phase2_tdma(),
@@ -329,7 +352,6 @@ public:
 
   int audio_stream(Call *call, Recorder *recorder, int16_t *samples,
                    int sampleCount) override {
-    const long source = current_source(call);
     const std::vector<long> patched = patched_talkgroups(call);
     bool all_zero = sampleCount > 0;
     for (int i = 0; i < sampleCount && all_zero; ++i) {
@@ -343,8 +365,10 @@ public:
     Encryption_Info encryption;
     bool have_ota = false;
     ota_state ota;
+    long source;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
+      source = stream_source_locked(call);
       capture_state &state = capture_states[key_for(call, source)];
       seq = state.seq++;
       start_sample = state.samples;
@@ -352,6 +376,15 @@ public:
       encryption_valid = state.encryption_valid;
       encryption = state.encryption;
       if (!all_zero && !encryption_valid) {
+        // seq and start_sample stay continuous per source across the
+        // capture, so a source that resumes after another keeps counting
+        // (ingest continues an in-flight entry for it without a gap or a
+        // msg-id collision). Only the run start is recorded for capture_end.
+        std::map<lane_key, long>::iterator last = last_pcm_sources.find(lane_for(call));
+        if (last == last_pcm_sources.end() || last->second != source) {
+          state.run_start_samples = state.samples;
+          last_pcm_sources[lane_for(call)] = source;
+        }
         state.samples += sampleCount;
       }
       std::map<lane_key, ota_state>::iterator found = ota_states.find(lane_for(call));
@@ -429,12 +462,14 @@ public:
   }
 
   int encryption_info(Call *call, const Encryption_Info &info) override {
-    const long source = info.source > 0 ? info.source : current_source(call);
     const std::vector<long> patched = patched_talkgroups(call);
     bool changed = false;
+    long source;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
-      capture_state &state = capture_states[key_for(call, current_source(call))];
+      const long stream_source = stream_source_locked(call);
+      source = info.source > 0 ? info.source : stream_source;
+      capture_state &state = capture_states[key_for(call, stream_source)];
       changed = !state.encryption_valid || state.encryption.algid != info.algid ||
                 state.encryption.keyid != info.keyid || state.encryption.mi != info.mi;
       state.encryption_valid = true;
@@ -464,9 +499,6 @@ public:
     if (frame.codec_type != CODEC_P25_IMBE && frame.codec_type != CODEC_P25_AMBE) {
       return 0;
     }
-    // Same source derivation as audio_stream; the decoder's own unit id is
-    // reported separately as ota_src and never selects the state.
-    const long source = current_source(call);
     uint64_t frame_hash = UINT64_C(1469598103934665603);
     frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(frame.codec_type));
     frame_hash = fnv_mix(frame_hash, static_cast<uint64_t>(frame.tgid));
@@ -484,7 +516,9 @@ public:
       ota.errs += static_cast<uint64_t>(frame.errs);
     }
 
-    capture_state &state = capture_states[key_for(call, source)];
+    // Same source derivation as audio_stream, after this frame's identity is
+    // applied, so the frame's fingerprint belongs to its own talker.
+    capture_state &state = capture_states[key_for(call, stream_source_locked(call))];
     if (state.have_frame_hash) {
       uint64_t window_hash = fnv_mix(fnv_mix(UINT64_C(1469598103934665603),
                                              state.last_frame_hash),
@@ -500,7 +534,7 @@ public:
   }
 
   int capture_end(Call *call, Call_Data_t call_info) override {
-    const long source = current_source(call);
+    long source = current_source(call);
     std::vector<long> patched;
     for (unsigned long group : call_info.patched_talkgroups) {
       patched.push_back(static_cast<long>(group));
@@ -512,15 +546,31 @@ public:
     uint64_t sample_count = 0;
     {
       std::lock_guard<std::mutex> lock(state_mutex);
-      for (const auto &item : capture_states) {
-        if (std::get<0>(item.first) != call_info.call_num ||
-            (source > 0 && std::get<1>(item.first) != source)) {
-          continue;
+      // The counters describe the capture's final transmission, i.e. the
+      // latest PCM run, which is the one ingest still has in flight: that
+      // source's last seq and the samples of its final run.
+      std::map<lane_key, long>::const_iterator last = last_pcm_sources.find(lane_for(call));
+      std::map<capture_key, capture_state>::const_iterator final_state =
+          last == last_pcm_sources.end() ? capture_states.end()
+                                         : capture_states.find(key_for(call, last->second));
+      if (final_state != capture_states.end()) {
+        source = last->second;
+        if (final_state->second.seq > 0) {
+          final_seq = final_state->second.seq - 1;
         }
-        if (item.second.seq > 0) {
-          final_seq = std::max(final_seq, item.second.seq - 1);
+        sample_count = final_state->second.samples - final_state->second.run_start_samples;
+      } else {
+        // No PCM was streamed: report the call record's source.
+        for (const auto &item : capture_states) {
+          if (std::get<0>(item.first) != call_info.call_num ||
+              (source > 0 && std::get<1>(item.first) != source)) {
+            continue;
+          }
+          if (item.second.seq > 0) {
+            final_seq = std::max(final_seq, item.second.seq - 1);
+          }
+          sample_count = std::max(sample_count, item.second.samples);
         }
-        sample_count = std::max(sample_count, item.second.samples);
       }
     }
     const int64_t timestamp = call_info.stop_time_ms > 0 ? call_info.stop_time_ms : now_ms();
@@ -562,6 +612,14 @@ public:
          it != ota_states.end();) {
       if (std::get<0>(it->first) == call_info.call_num) {
         it = ota_states.erase(it);
+      } else {
+        ++it;
+      }
+    }
+    for (std::map<lane_key, long>::iterator it = last_pcm_sources.begin();
+         it != last_pcm_sources.end();) {
+      if (std::get<0>(it->first) == call_info.call_num) {
+        it = last_pcm_sources.erase(it);
       } else {
         ++it;
       }

@@ -1098,7 +1098,8 @@ namespace gr {
 					rx_status.error_count += framer->bch_errors;
 					rx_status.total_len += 64;
 					rx_status.last_update = time(NULL); //comment/remove if you don't care about non-voice frames
-					terminate_call = std::pair<bool,long>(false,0);
+					// terminate_call is latched until the frame assembler reads
+					// it, so a frame after the TDU in the same batch cannot erase it.
 
                     process_frame();
                 }  // end of complete frame

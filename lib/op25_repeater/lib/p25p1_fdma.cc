@@ -321,6 +321,11 @@ namespace gr {
             }
             ec = rs16.decode(HB); // Reed Solomon (36,20,17) error correction
 
+            // An HDU starts a new voice transmission and carries no unit id,
+            // so drop the previous talker even if its terminator was missed.
+            cached_src_id = -1;
+            cached_id_timestamp = 0;
+
             if ((ec >= 0) && (ec <= 8)) { // upper limit of 8 corrections
                 j = 27;												// 72 bit MI
                 for (i = 0; i < 9;) {
@@ -445,6 +450,7 @@ namespace gr {
             }
 
             process_TTDU();
+            reset_keyup_identity();
 
             if (d_debug >= 10) {
                 fprintf (stderr, "\n");
@@ -473,10 +479,22 @@ namespace gr {
                 HB[40 + i] = D & 63;
             }
             process_LCW(HB);
+            // After process_LCW: a TDULC can carry the ending talker's Group
+            // Voice Channel User, which must not survive the terminator.
+            reset_keyup_identity();
 
             if (d_debug >= 10) {
                 fprintf (stderr, ", gly_errs=%lu\n", gly_errs);
             }
+        }
+
+        // The identity cache describes one key-up: a voice terminator ends it,
+        // so the next key-up never inherits the previous talker before its own
+        // link control decodes.
+        void p25p1_fdma::reset_keyup_identity() {
+            cached_src_id = -1;
+            cached_grp_id = -1;
+            cached_id_timestamp = 0;
         }
 
         void p25p1_fdma::process_LCW(std::vector<uint8_t>& HB) {
@@ -909,10 +927,11 @@ namespace gr {
                         // tgid is the HDU ESS group (never reset between
                         // assignments) and feeds existing fingerprints, so it
                         // is left unchanged. The ota_* arguments carry the
-                        // per-assignment identity cache: group/source from
-                        // LDU1/TDULC Group Voice Channel User (group also from
-                        // HDU), -1 when unknown, and the wall-clock ms when
-                        // link control last set them (0 when unknown).
+                        // current key-up's identity cache: group/source from
+                        // LDU1 Group Voice Channel User (group also from HDU),
+                        // cleared at HDU (source) and TDU/TDULC (both), -1
+                        // when unknown, and the wall-clock ms when link
+                        // control last set them (0 when unknown).
                         voice_codec_cb_(0 /*CODEC_P25_IMBE*/, (long)vf_tgid,
                                         (cached_src_id > 0) ? (uint32_t)cached_src_id : 0,
                                         u, 8, (int)errs,

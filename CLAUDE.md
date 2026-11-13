@@ -2,6 +2,8 @@
 
 Notes for Claude Code when working in this repository. Keep changes minimal and idiomatic to what is already here — this is a long-lived C++ project with a lot of historical conventions baked into the structure.
 
+This is a fork (branch `trunkd`); [FORK.md](FORK.md) lists every change from upstream and how to rebase onto it. Any change to the patch series updates FORK.md too.
+
 ## What this project is
 
 Trunk Recorder is a C++ application that uses GNU Radio + OP25 to record voice calls from trunked (P25, SmartNet) and conventional (P25, DMR, analog) radio systems via SDRs. It is a single binary (`trunk-recorder`) plus a set of loadable plugin shared libraries.

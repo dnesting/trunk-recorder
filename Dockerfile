@@ -60,7 +60,16 @@ RUN git init -q /src/user_plugins/tr-plugin-mqtt && \
 
 WORKDIR /src/build
 
-RUN cmake .. && make -j$(nproc) && make DESTDIR=/newroot install
+# Compile jobs; the default (all CPUs) can exhaust a memory-limited builder.
+ARG MAKE_JOBS=
+RUN cmake .. && make -j${MAKE_JOBS:-$(nproc)} && make DESTDIR=/newroot install
+
+# Offline tests (FORK.md). Built only on request: --target test.
+FROM builder AS test
+RUN cmake -DSIMPLESTREAM_TESTS=ON -DTALKGROUP_GATE_TESTS=ON .. && \
+    make -j${MAKE_JOBS:-$(nproc)} simplestream_test talkgroup_gate_test && \
+    ./plugins/simplestream/simplestream_test && \
+    ./talkgroup_gate_test
 
 # Stage 2 build
 FROM ubuntu:24.04

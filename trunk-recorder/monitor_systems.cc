@@ -11,11 +11,24 @@ using namespace std;
 extern boost::shared_ptr<boost::log::sinks::synchronous_sink<boost::log::sinks::text_file_backend>> global_log_sink;
 
 volatile sig_atomic_t exit_flag = 0;
+volatile sig_atomic_t drain_flag = 0;
 volatile sig_atomic_t rotate_log_flag = 0;
 int exit_code = EXIT_SUCCESS;
 
+// While draining, calls in progress keep recording but no new calls start.
+static bool draining = false;
+static long drain_skipped_grants = 0;
+
 void exit_interupt(int sig) { // can be called asynchronously
   exit_flag = 1;              // set flag
+}
+
+void drain_signal(int sig) { // can be called asynchronously
+  if (drain_flag) {
+    exit_flag = 1; // a second SIGTERM exits without waiting
+  } else {
+    drain_flag = 1;
+  }
 }
 
 void rotate_log_signal(int sig) { // can be called asynchronously
@@ -505,6 +518,11 @@ void handle_call_grant(TrunkMessage message, System *sys, bool grant_message, Co
     it++;
   }
 
+  if (!call_found && draining) {
+    drain_skipped_grants++;
+    return;
+  }
+
   if (!call_found) {
     Call *call = Call::make(message, sys, config);
 
@@ -871,6 +889,24 @@ void process_recorder_message_queues(std::vector<Call *> &calls) {
   }
 }
 
+// Calls that still have audio to finish: every trunked call with a recorder,
+// and conventional calls that have recorded something since they last
+// concluded.
+static size_t count_calls_in_progress(std::vector<Call *> &calls) {
+  size_t count = 0;
+  for (vector<Call *>::iterator it = calls.begin(); it != calls.end(); ++it) {
+    Call *call = *it;
+    if (call->get_state() != RECORDING) {
+      continue;
+    }
+    if (call->is_conventional() && (call->get_current_length() <= 0)) {
+      continue;
+    }
+    count++;
+  }
+  return count;
+}
+
 int monitor_messages(Config &config, gr::top_block_sptr &tb, std::vector<Source *> &sources, std::vector<System *> &systems, std::vector<Call *> &calls) {
   gr::message::sptr msg;
 
@@ -885,7 +921,11 @@ int monitor_messages(Config &config, gr::top_block_sptr &tb, std::vector<Source 
   P25Parser *p25_parser;
   DmrParser *dmr_parser;
 
+  time_t drain_start = 0;
+  size_t drain_last_reported = 0;
+
   signal(SIGINT, exit_interupt);
+  signal(SIGTERM, drain_signal);
   signal(SIGHUP, rotate_log_signal);
 
   smartnet_parser = new SmartnetParser(systems.front()); // this has to eventually be generic;
@@ -908,6 +948,37 @@ int monitor_messages(Config &config, gr::top_block_sptr &tb, std::vector<Source 
       BOOST_LOG_TRIVIAL(info) << "Cleaning up & Exiting...";
       Call_Concluder::shutdown_call_data_workers(std::chrono::seconds(10));
       return exit_code;
+    }
+
+    if (drain_flag && !draining) {
+      draining = true;
+      drain_start = time(NULL);
+      drain_last_reported = count_calls_in_progress(calls);
+      if (config.drain_timeout <= 0) {
+        BOOST_LOG_TRIVIAL(info) << "Caught SIGTERM - drainTimeout is 0, exiting without draining";
+        exit_flag = 1;
+        continue;
+      }
+      BOOST_LOG_TRIVIAL(info) << "Caught SIGTERM - draining: no new calls will be recorded; waiting up to " << config.drain_timeout << "s for " << drain_last_reported << " calls in progress to end (SIGTERM or SIGINT again exits now)";
+    }
+
+    if (draining) {
+      size_t in_progress = count_calls_in_progress(calls);
+      time_t drain_elapsed = time(NULL) - drain_start;
+      if (in_progress == 0) {
+        BOOST_LOG_TRIVIAL(info) << "Drain complete after " << drain_elapsed << "s: no calls in progress (" << drain_skipped_grants << " call grants ignored while draining)";
+        exit_flag = 1;
+        continue;
+      }
+      if (drain_elapsed >= config.drain_timeout) {
+        BOOST_LOG_TRIVIAL(info) << "Drain timeout after " << drain_elapsed << "s: concluding " << in_progress << " calls still in progress (" << drain_skipped_grants << " call grants ignored while draining)";
+        exit_flag = 1;
+        continue;
+      }
+      if (in_progress != drain_last_reported) {
+        BOOST_LOG_TRIVIAL(info) << "Draining: " << in_progress << " calls in progress, " << (config.drain_timeout - drain_elapsed) << "s until drain timeout";
+        drain_last_reported = in_progress;
+      }
     }
 
     if (rotate_log_flag) { // SIGHUP received for log rotation

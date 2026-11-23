@@ -58,6 +58,7 @@ struct Config {
   bool debug_recorder;
   int debug_recorder_port;
   double call_timeout;
+  int drain_timeout;
   bool console_log;
   bool log_file;
   bool syslog_friendly;

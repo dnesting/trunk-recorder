@@ -207,6 +207,8 @@ bool load_config(string config_file, Config &config, gr::top_block_sptr &tb, std
     BOOST_LOG_TRIVIAL(info) << "Default Mode: " << config.default_mode;
     config.call_timeout = data.value("callTimeout", 3.0);
     BOOST_LOG_TRIVIAL(info) << "Call Timeout (seconds): " << config.call_timeout;
+    config.drain_timeout = data.value("drainTimeout", 60);
+    BOOST_LOG_TRIVIAL(info) << "Drain Timeout (seconds): " << config.drain_timeout;
     config.control_message_warn_rate = data.value("controlWarnRate", 10);
     BOOST_LOG_TRIVIAL(info) << "Control channel warning rate: " << config.control_message_warn_rate;
     config.control_retune_limit = data.value("controlRetuneLimit", 0);

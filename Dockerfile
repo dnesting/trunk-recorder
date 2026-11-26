@@ -111,6 +111,10 @@ WORKDIR /app
 ENV HOME=/tmp
 
 #USER nobody
+# trunk-recorder exits cleanly on SIGINT and ignores SIGTERM as PID 1;
+# container runtimes stop it with this signal.
+STOPSIGNAL SIGINT
+
 # We need to use this style of CMD or else it will leak zombie processes with Unit Script
 # See #539
 CMD trunk-recorder --config=/app/config.json

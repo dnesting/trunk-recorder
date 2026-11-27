@@ -20,11 +20,17 @@ remote `upstream`, branch `master`).
   (HEAD's commit date and abbreviated hash), linux/amd64, built by
   `fork/release.sh`. The deployed tag is set in the tpl `kube` repo at
   `david.tpl/trunk/recorder.yaml`.
+- All fork work is committed to `trunkd`. Do not create or commit to other
+  branches; they are not built or deployed.
 - Retired: the stacked branches `feature/simplestream-transmission-v2`,
   `fix/capture-end-ordering`, `simplestream-ota-labels` and
-  `simplestream-voice-src` (all contained in `trunkd`), and images tagged
-  `simplestream-v<N>-<sha>`. `fork`, `master`, `unit-filename`, `encryption`,
-  `pcap` and `data` on `origin` are older experiments not carried here.
+  `simplestream-voice-src` (contained in `trunkd`), and images tagged
+  `simplestream-v<N>-<sha>` (source kept by tags of the same name).
+  `fork`, `master`, `unit-filename`, `encryption`, `pcap` and `data` on
+  `origin` are older experiments not carried here.
+- The image keeps the default stop signal, SIGTERM, which starts the drain
+  (see the patch list). Do not set `STOPSIGNAL SIGINT`: SIGINT exits at once
+  and cuts off calls in progress.
 
 ## Updating from upstream
 
